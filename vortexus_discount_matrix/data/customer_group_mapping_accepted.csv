@@ -1,0 +1,12 @@
+﻿ERPNext Customer Group,Matrix Column,Review Status,Notes
+Dealers,Dealers,Accepted,Proposed customer-group mapping confirmed by user.
+End User/Water refill,End Users / Retail,Accepted,Proposed customer-group mapping confirmed by user.
+Corporate,Corporates,Accepted,Proposed customer-group mapping confirmed by user.
+Technician,Technicians,Accepted,Proposed customer-group mapping confirmed by user.
+Government/Parastatals,NGOs / Parastatals,Accepted,Proposed customer-group mapping confirmed by user.
+NGO'S /Social Enterprises,NGOs / Parastatals,Accepted,Proposed customer-group mapping confirmed by user.
+Traders/Contractors/Consultants,Traders,Accepted,Proposed customer-group mapping confirmed by user.
+Government,NGOs / Parastatals,Accepted,Proposed customer-group mapping confirmed by user.
+Non Profit,NGOs / Parastatals,Accepted,Proposed customer-group mapping confirmed by user.
+Commercial,Corporates,Accepted,Proposed customer-group mapping confirmed by user.
+Individual,End Users / Retail,Accepted,Proposed customer-group mapping confirmed by user.

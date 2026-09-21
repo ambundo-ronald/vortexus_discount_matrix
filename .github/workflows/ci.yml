@@ -1,0 +1,25 @@
+name: App checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Unit and adapter tests
+        run: python -m unittest discover -s tests -v
+      - name: Python syntax
+        run: python -m compileall -q vortexus_discount_matrix
+      - name: JavaScript syntax
+        run: node --check vortexus_discount_matrix/public/js/transaction.js
+      - name: Build package
+        run: python -m pip wheel --no-deps --wheel-dir dist .

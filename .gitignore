@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.reference/
+dist/
+*.egg-info/
+
+# Local source exports, review decisions and generated proposal tooling
+review/
+build_mapping.py
+*.xlsx
+*.xls
+
+# Local environments and credentials
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+site_config.json
+common_site_config.json
+.vscode/
+.pytest_cache/

@@ -1,0 +1,22 @@
+﻿Matrix Row,Solution Line,Category,Dealers,Traders,Technicians,NGOs / Parastatals,Corporates,End Users / Retail
+7,Water Pumping,Equipment,40.0,32.0,28.8,27.36,27.36,24.624
+8,Water Pumping,Parts,15.0,12.0,10.8,10.26,10.26,9.234
+10,Water Treatment,Equipment,50.0,40.0,36.0,34.2,34.2,30.78
+11,Water Treatment,Consumables,30.0,24.0,21.6,20.52,20.52,18.468
+12,Water Treatment,Parts,10.0,8.0,7.2,6.84,6.84,6.156
+14,Water Treatment Chemicals & Media,Chemicals,15.0,12.0,10.8,10.26,10.26,9.234
+16,Swimming Pools,Equipment,50.0,40.0,36.0,34.2,34.2,30.78
+17,Swimming Pools,Parts,30.0,24.0,21.6,20.52,20.52,18.468
+18,Swimming Pools,Consumables,15.0,12.0,10.8,10.26,10.26,9.234
+19,Swimming Pools,Chemicals,15.0,12.0,10.8,10.26,10.26,9.234
+21,Solar Equipment,Equipment,25.0,20.0,18.0,17.1,17.1,15.39
+22,Solar Equipment,Parts,10.0,8.0,7.2,6.84,6.84,6.156
+24,Specialized Industrial Products,Equipment,15.0,12.0,10.8,10.26,10.26,9.234
+25,Specialized Industrial Products,Consumables,10.0,8.0,7.2,6.84,6.84,6.156
+26,Specialized Industrial Products,Fittings & Accessories,5.0,4.0,3.6,3.42,3.42,3.078
+27,Specialized Industrial Products,Parts,10.0,8.0,7.2,6.84,6.84,6.156
+29,Shared Piping / Hardware,"Fittings & Accessories (PVC,PPR,HDPE,GI)",25.0,20.0,18.0,17.1,17.1,15.39
+30,Shared Piping / Hardware,Plumbing & Piping Accessories,25.0,20.0,18.0,17.1,17.1,15.39
+31,Shared Piping / Hardware,Hardware,25.0,20.0,18.0,17.1,17.1,15.39
+32,Share Electricals& Cables,Controls & Electricals,10.0,8.0,7.2,6.84,6.84,6.156
+33,Shared Piping / Hardware,Consumables,25.0,20.0,18.0,17.1,17.1,15.39
