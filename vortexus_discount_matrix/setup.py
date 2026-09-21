@@ -53,9 +53,22 @@ def install():
                 settings.append('customer_mappings', {'customer_group': group, 'matrix_column': column})
         settings.mappings_initialized = 1
         settings.save(ignore_permissions=True)
+    install_transaction_fields()
+
+
+def install_transaction_fields():
     fields = [
         field('custom_vdm_section', 'Discount Matrix', 'Section Break', insert_after='items'),
         field('custom_vdm_status', 'Matrix Status', read_only=1, no_copy=1),
         field('custom_vdm_summary', 'Matrix Review', 'Small Text', read_only=1, no_copy=1),
     ]
-    create_custom_fields({dt: fields for dt in ('Quotation', 'Sales Order', 'Sales Invoice')}, update=True)
+    # These are app-owned display fields, with no Link/Table options. Frappe's
+    # normal on_update checks every field on the target DocType, including
+    # unrelated site customizations (e.g. Delivery Personnel with empty options).
+    # Scope this supported flag to this batch; do not alter site fields or
+    # disable transaction/approval validation.
+    create_custom_fields(
+        {dt: [dict(df) for df in fields] for dt in ('Quotation', 'Sales Order', 'Sales Invoice')},
+        ignore_validate=True,
+        update=True,
+    )

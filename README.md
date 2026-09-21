@@ -100,3 +100,12 @@ git push -u origin main
 ```
 
 Connect that repository and the `main` branch to the Frappe Cloud private bench. The CI workflow checks calculations, mocked adapters, syntax and packaging; it does not replace staging tests on ERPNext.
+
+
+## Installation troubleshooting: unrelated custom fields
+
+If installation reports `Delivery Personnel: Options must be a valid DocType`, the existing Sales Invoice field `custom_delivery_personnel` has missing/invalid Link options. The installer now uses Frappe's scoped `ignore_validate` option only when adding/updating its three display fields per transaction. It leaves all unrelated fields untouched and retains normal discount/approval validation. Re-running installation or migration updates the same fields without creating duplicates.
+
+Deploy the latest main commit on the private bench, then retry installation. If the app already appears installed after a partial failure, run a site migration instead; the after_migrate hook completes setup. The unrelated field still needs its intended DocType configured by its owner; the app does not guess or change that target.
+
+The reported site also has an existing `pricing_rule` app overriding sales document controllers and existing discount-approval hooks. Keep VDM enforcement disabled until staging verifies how both systems interact; installing VDM does not remove the existing approval rules.
