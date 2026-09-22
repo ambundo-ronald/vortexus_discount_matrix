@@ -21,5 +21,7 @@ jobs:
         run: python -m compileall -q vortexus_discount_matrix
       - name: JavaScript syntax
         run: node --check vortexus_discount_matrix/public/js/transaction.js
+      - name: Button feedback tests
+        run: node tests/test_buttons.js
       - name: Build package
         run: python -m pip wheel --no-deps --wheel-dir dist .

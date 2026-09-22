@@ -9,7 +9,7 @@ An installable Frappe app implementing the accepted Discount Matrix policy. It c
 - No item-level overrides or automatic parent-group inheritance.
 - Standard Selling is an independent baseline. Direct price increases and discounts below the ceiling are allowed. This app does not automatically apply the maximum discount.
 - Item and document discounts are evaluated using ERPNext's recalculated net item rates and a Standard Selling baseline normalized through the same tax calculation.
-- Excessive discounts can be saved as drafts, but submission requires a Sales Manager exception with a nonblank reason.
+- Excessive discounts can be saved as drafts with an instruction to adjust the price; submission requires corrected prices or an explicit Sales Manager exception with a nonblank reason.
 - Approval is a separate, read-only audit record, bound to the document and its calculated terms. Copying documents does not carry authorization. Different prices, quantities, customer, taxes, baseline prices or limits require approval for those terms. An existing approval for identical terms on the same document remains valid.
 - Browser warnings help salespeople; server checks protect normal saves/submissions through Desk, imports and document APIs. Direct database writes by administrators are outside document hooks.
 
@@ -47,7 +47,7 @@ Deploy version 0.2.0 and run the normal site migration. On staging, verify savin
 
 ## Sales and approval flow
 
-Salespeople can edit rates normally. **Check Discount Matrix** previews limits; changes to rates and discounts also trigger a delayed preview. A violating draft is marked **Pending Approval** and cannot be submitted.
+Salespeople can edit rates normally. **Check Discount Matrix** previews limits; changes to rates and discounts also trigger a delayed preview. A violating draft is marked **Adjust Price** and cannot be submitted.
 
 The Sales Manager opens the saved draft, selects **Approve Discount Exception**, enters a reason and approves. The document displays **Approved Exception**. The manager or a user with existing submit permissions can then submit it. Managers cannot bypass the reason by submitting directly. The app adds no external notifications or automatic emails.
 
@@ -109,3 +109,12 @@ If installation reports `Delivery Personnel: Options must be a valid DocType`, t
 Deploy the latest main commit on the private bench, then retry installation. If the app already appears installed after a partial failure, run a site migration instead; the after_migrate hook completes setup. The unrelated field still needs its intended DocType configured by its owner; the app does not guess or change that target.
 
 The reported site also has an existing `pricing_rule` app overriding sales document controllers and existing discount-approval hooks. Keep VDM enforcement disabled until staging verifies how both systems interact; installing VDM does not remove the existing approval rules.
+
+
+## Version 0.2.1: explicit checks and adjust-price messaging
+
+The Check Discount Matrix button always opens a result dialog, including Disabled and Not Applicable outcomes. It lists checked limits and excluded item rows. A violating saved draft shows Adjust Price and tells the salesperson to increase the price or reduce the discount. No approval request, workflow assignment, or notification to a manager is created automatically. A Sales Manager may deliberately open the saved draft and approve an exception with a reason.
+
+Before submission the server checks the current terms independently of displayed status. A second on_submit hook checks the persisted document within the submission transaction; a violation raises an exception to roll back submission. These checks still respect the enable setting and accepted scope: disabled enforcement or unmapped groups do not block sales. The dialog now explains those cases visibly.
+
+The reported 500-to-150 Technician scenario is tested against a mapped Water Treatment Equipment group (36% ceiling; minimum 320) for all three document types using controlled ERPNext tax doubles. Button tests cover all five outcomes. Actual site verification is still required, particularly with the installed pricing_rule overrides. The exact cause of the reported live submission cannot be established without its Item Group, saved settings, and deployed version.

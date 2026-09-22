@@ -11,6 +11,7 @@ after_migrate = "vortexus_discount_matrix.setup.install"
 doc_events = {
     dt: {
         "validate": "vortexus_discount_matrix.validation.validate",
+        "on_submit": "vortexus_discount_matrix.validation.on_submit",
         "before_submit": "vortexus_discount_matrix.validation.before_submit",
         "before_update_after_submit": "vortexus_discount_matrix.validation.before_submit",
     }

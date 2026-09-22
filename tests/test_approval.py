@@ -77,9 +77,9 @@ class ApprovalTests(unittest.TestCase):
 
     def test_submit_blocks_even_if_caller_sets_approved_status(self):
         doc = types.SimpleNamespace(custom_vdm_status='Approved Exception', custom_vdm_summary='')
-        result = {'status': 'Pending Approval', 'violations': []}
+        result = {'status': 'Adjust Price', 'violations': []}
         with patch.object(self.v, 'inspect', return_value=result):
-            with self.assertRaisesRegex(ValueError, 'Consult the Sales Manager'):
+            with self.assertRaisesRegex(ValueError, 'Increase the selling price'):
                 self.v.before_submit(doc)
 
     def test_disabled_feature_does_not_inspect(self):

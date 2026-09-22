@@ -9,7 +9,7 @@ DOCTYPES = ('Quotation', 'Sales Order', 'Sales Invoice')
 
 
 def enabled():
-    return frappe.db.get_single_value('VDM Settings', 'enabled')
+    return str(frappe.db.get_single_value('VDM Settings', 'enabled') or 0) in ('1', 'True')
 
 
 def customer_group(doc):
@@ -26,10 +26,13 @@ def customer_group(doc):
 def inspect(doc):
     if doc.doctype not in DOCTYPES:
         frappe.throw('Unsupported document type.')
-    result = {'status': 'Not Applicable', 'lines': [], 'violations': [], 'fingerprint': '', 'snapshot': {}}
+    result = {'status': 'Not Applicable', 'lines': [], 'violations': [], 'fingerprint': '', 'snapshot': {}, 'message': '', 'excluded_rows': []}
     groups, _ = policy()
     actual_groups = {r.idx: frappe.db.get_value('Item', r.item_code, 'item_group') for r in doc.items}
+    result['excluded_rows'] = [dict(row=r.idx, item_code=r.item_code, item_group=actual_groups[r.idx],
+        reason='Item Group has no accepted matrix mapping.') for r in doc.items if actual_groups[r.idx] not in groups]
     if not any(g in groups for g in actual_groups.values()):
+        result['message'] = 'No items were checked: their Item Groups are outside the accepted matrix mappings.'
         return result
     group = customer_group(doc)
     from vortexus_discount_matrix.settings import customer_mappings
@@ -37,6 +40,7 @@ def inspect(doc):
     applicable = [(r, limit(actual_groups[r.idx], group, mappings)) for r in doc.items]
     applicable = [(r, cap) for r, cap in applicable if cap is not None]
     if not applicable:
+        result['message'] = f'No items were checked: Customer Group {group or "(blank)"} has no mapping in VDM Settings.'
         return result
     if doc.get('is_return') or doc.get('is_consolidated'):
         frappe.throw('Discount Matrix requires separate review for returns or consolidated invoices; this version does not support them.')
@@ -80,10 +84,13 @@ def inspect(doc):
         taxes=[pick(r, 'charge_type account_head rate tax_amount included_in_print_rate row_id add_deduct_tax category') for r in doc.get('taxes', [])])
     result['snapshot'] = snapshot
     result['fingerprint'] = fingerprint(snapshot)
-    result['status'] = 'Pending Approval' if result['violations'] else 'Within Limit'
+    result['status'] = 'Adjust Price' if result['violations'] else 'Within Limit'
+    result['message'] = ('Discount exceeds the permitted limit. Increase the selling price or reduce the discount.'
+        if result['violations'] else f"All {len(result['lines'])} checked item lines are within their limits.")
     if result['violations'] and not doc.is_new():
         if frappe.db.exists('VDM Approval', {'reference_doctype': doc.doctype, 'reference_name': doc.name, 'fingerprint': result['fingerprint']}):
             result['status'] = 'Approved Exception'
+            result['message'] = 'A Sales Manager explicitly approved an exception for these exact terms.'
     return result
 
 
@@ -94,17 +101,25 @@ def summary(result):
 def validate(doc, method=None):
     if not enabled():
         doc.custom_vdm_status = 'Disabled'
-        doc.custom_vdm_summary = ''
+        doc.custom_vdm_summary = 'Discount Matrix enforcement is disabled in VDM Settings. Prices are not being blocked.'
         return
     result = inspect(doc)
     doc.custom_vdm_status = result['status']
-    doc.custom_vdm_summary = summary(result)
+    doc.custom_vdm_summary = summary(result) or result.get('message', '')
 
 
 def before_submit(doc, method=None):
     validate(doc)
-    if doc.custom_vdm_status == 'Pending Approval':
-        frappe.throw('Discount exceeds the permitted matrix limit. Consult the Sales Manager for approval with a reason.\n' + doc.custom_vdm_summary)
+    if doc.custom_vdm_status in ('Adjust Price', 'Pending Approval'):
+        frappe.throw('Discount exceeds the permitted matrix limit. Increase the selling price or reduce the discount before submitting.\n' + doc.custom_vdm_summary)
+
+
+def on_submit(doc, method=None):
+    # Last check of the persisted document, in the submission transaction.
+    # An exception rolls back submission even when another before_submit hook
+    # modifies prices after our earlier check. Never trust display status fields.
+    if enabled():
+        before_submit(frappe.get_doc(doc.doctype, doc.name))
 
 
 @frappe.whitelist()
@@ -117,9 +132,10 @@ def preview(document):
     else:
         frappe.get_doc(doc.doctype, doc.name).check_permission('read')
     if not enabled():
-        return {'status': 'Disabled', 'violations': [], 'lines': []}
+        return {'status': 'Disabled', 'violations': [], 'lines': [], 'excluded_rows': [],
+            'message': 'Discount Matrix enforcement is disabled in VDM Settings. No discount limit is being enforced.'}
     result = inspect(doc)
-    return {k: result[k] for k in ('status', 'lines', 'violations')}
+    return {k: result[k] for k in ('status', 'lines', 'violations', 'message', 'excluded_rows')}
 
 
 @frappe.whitelist()
