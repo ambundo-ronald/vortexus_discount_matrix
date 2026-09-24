@@ -15,13 +15,14 @@ const assert = require('node:assert/strict');
     const frm = {
       doc: {doctype: 'Sales Order', docstatus: 0},
       is_new: () => false,
+      remove_custom_button: () => {},
       add_custom_button: (label, action) => { buttons[label] = action; },
       dashboard: {set_headline_alert: () => {}},
     };
     vm.runInNewContext(fs.readFileSync('vortexus_discount_matrix/public/js/transaction.js', 'utf8'), {
       frappe, __: value => value, console, setTimeout, clearTimeout,
     });
-    handlers['Sales Order'].refresh(frm);
+    await handlers['Sales Order'].refresh(frm);
     await buttons['Check Discount Matrix']();
     assert.equal(dialogs.length, 1, status + ' must produce a visible dialog');
     assert.ok(dialogs[0].message.includes(status));

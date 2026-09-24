@@ -35,7 +35,10 @@ def install():
             frappe.get_doc(dict(doctype='DocType', name=name, module='Vortexus Discount Matrix', custom=1, **definition)).insert(ignore_permissions=True)
     # Add fields to both new installs and sites upgrading from version 0.1.0.
     settings_type = frappe.get_doc('DocType', 'VDM Settings')
+    approvals_added = not any(f.fieldname == 'allow_manager_approvals' for f in settings_type.fields)
     for definition in [
+        field('allow_manager_approvals', 'Allow Sales Manager Discount Exceptions', 'Check', default='1',
+            description='When unchecked, direct and inherited exceptions cannot authorize submission. Existing approval records are retained.'),
         field('customer_mappings', 'Customer Group to Matrix Group', 'Table', options='VDM Customer Mapping',
             description='Unmapped customer groups are outside this control. Each customer group may appear only once.'),
         field('mappings_initialized', 'Mappings Initialized', 'Check', hidden=1, read_only=1, default='0'),
@@ -46,6 +49,9 @@ def install():
     settings_type.save(ignore_permissions=True)
     frappe.clear_cache(doctype='VDM Settings')
     settings = frappe.get_doc('VDM Settings')
+    if approvals_added:
+        settings.allow_manager_approvals = 1
+        settings.save(ignore_permissions=True)
     if not settings.get('mappings_initialized'):
         # Seed once. An intentionally emptied table must remain empty on migration.
         if not settings.get('customer_mappings'):

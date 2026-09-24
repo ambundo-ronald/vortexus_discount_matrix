@@ -105,3 +105,14 @@ class ApprovalTests(unittest.TestCase):
         result = {'snapshot': {'items': [{'rate': 150}]}, 'fingerprint': terms_fingerprint({'items': [{'rate': 150}]})}
         self.assertFalse(self.v.matching_approval(types.SimpleNamespace(doctype='Sales Order', name='SO-1'), result))
         self.assertIn('items[1].rate', result['approval_mismatch'])
+
+    def test_approval_api_is_blocked_when_switch_is_off(self):
+        self.frappe.db.get_single_value.side_effect = lambda dt, field: field == 'enabled'
+        with self.assertRaisesRegex(ValueError, 'exceptions are disabled'):
+            self.v.approve('Sales Order', 'SO-1', 'Reason')
+        self.frappe.get_doc.assert_not_called()
+
+    def test_button_permission_requires_setting_and_role(self):
+        self.assertTrue(self.v.approval_options()['allow_approval'])
+        self.frappe.db.get_single_value.side_effect = lambda dt, field: field == 'enabled'
+        self.assertFalse(self.v.approval_options()['allow_approval'])

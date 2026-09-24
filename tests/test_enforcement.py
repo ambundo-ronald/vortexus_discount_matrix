@@ -135,3 +135,21 @@ class EnforcementTests(unittest.TestCase):
             invoice.items[0].rate = 149
             with self.assertRaises(ValueError):
                 self.v.before_submit(invoice)
+
+    def test_existing_approval_does_not_bypass_disabled_exceptions(self):
+        doc = self.scenario()
+        self.frappe.db.exists.return_value = True
+        self.frappe.db.get_single_value.side_effect = lambda dt, field: field == 'enabled'
+        with self.inspect_patches():
+            with self.assertRaisesRegex(ValueError, 'Increase the selling price'):
+                self.v.before_submit(doc)
+            self.assertEqual(doc.custom_vdm_status, 'Adjust Price')
+            self.frappe.db.exists.assert_not_called()
+
+    def test_valid_approved_terms_allow_submission_when_enabled(self):
+        doc = self.scenario()
+        self.frappe.db.exists.return_value = True
+        with self.inspect_patches():
+            self.v.before_submit(doc)
+            self.v.on_submit(doc)
+            self.assertEqual(doc.custom_vdm_status, 'Approved Exception')

@@ -152,3 +152,12 @@ This is a group-coverage report, not a list of sales transactions exceeding disc
 ## Version 0.4.1: stable approval comparison
 
 Approval comparison now normalizes equivalent numeric representations (for example 1 and 1.0), blank optional values and item-tax JSON formatting. It does not round away price or quantity changes. Old approval records are compared using their saved snapshots without rewriting audit data. Approvals are recorded after the document save/reload, and rejection messages identify changed snapshot paths when a previous approval exists. The actual cause of a specific rejection still requires comparison with that document's saved approval terms.
+
+
+## Version 0.5: enable or disable manager exceptions
+
+VDM Settings now includes **Allow Sales Manager Discount Exceptions**, editable by System Managers. It starts checked to preserve the current approval behaviour and migrations preserve subsequent changes.
+
+When checked, an unchanged, valid approved document can submit without another approval; eligible source-document approvals can carry forward. Normal ERPNext submit permissions still apply. When unchecked, the manager approval button is removed on form refresh, the approval API rejects requests, and both direct and inherited approval records are ignored for exception enforcement. Sales above the matrix limits must be corrected. Existing approval audit records and submitted documents are not deleted or changed. Re-enabling the setting allows still-valid historical approvals again.
+
+The separate **Enable discount matrix enforcement** switch remains the master control. Turning enforcement off disables this app's price blocks altogether. To enforce strict limits with no exceptions, leave enforcement checked and uncheck only the manager-exceptions setting. Refresh open sales forms after changing settings; server checks take effect immediately.

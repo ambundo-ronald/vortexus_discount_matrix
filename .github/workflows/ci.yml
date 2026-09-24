@@ -25,5 +25,7 @@ jobs:
         run: node tests/test_buttons.js
       - name: Approval table tests
         run: node tests/test_approval_view.js
+      - name: Approval switch tests
+        run: node tests/test_approval_switch.js
       - name: Build package
         run: python -m pip wheel --no-deps --wheel-dir dist .

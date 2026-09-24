@@ -45,12 +45,15 @@
   }
   for (const dt of ['Quotation', 'Sales Order', 'Sales Invoice']) {
     frappe.ui.form.on(dt, {
-      refresh(frm) {
+      async refresh(frm) {
         frm.add_custom_button(__('Check Discount Matrix'), () => {
           clearTimeout(frm._vdm_timer);
           return runCheck(frm, true);
         });
+        frm.remove_custom_button(__('Approve Discount Exception'));
         if (!frm.is_new() && frm.doc.docstatus === 0 && frappe.user.has_role('Sales Manager')) {
+          const options = await frappe.call({method: method + 'approval_options'});
+          if (options.message?.allow_approval) {
           frm.add_custom_button(__('Approve Discount Exception'), () => {
             if (frm.is_dirty()) return frappe.msgprint(__('Save your changes before approving.'));
             frappe.prompt([{fieldname: 'reason', fieldtype: 'Small Text', label: __('Approval reason'), reqd: 1}], async values => {
@@ -59,6 +62,7 @@
               await runCheck(frm, true);
             }, __('Approve Discount Exception'), __('Approve'));
           });
+          }
         }
         if (isViolation(frm.doc.custom_vdm_status)) {
           frm.dashboard.set_headline_alert(__('Discount exceeds the permitted limit. Increase the selling price or reduce the discount.'), 'red');

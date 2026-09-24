@@ -12,6 +12,15 @@ def enabled():
     return str(frappe.db.get_single_value('VDM Settings', 'enabled') or 0) in ('1', 'True')
 
 
+def approvals_allowed():
+    return str(frappe.db.get_single_value('VDM Settings', 'allow_manager_approvals') or 0) in ('1', 'True')
+
+
+@frappe.whitelist()
+def approval_options():
+    return {'allow_approval': bool(enabled() and approvals_allowed() and 'Sales Manager' in frappe.get_roles())}
+
+
 def customer_group(doc):
     customer = doc.get('customer')
     if doc.doctype == 'Quotation':
@@ -87,11 +96,14 @@ def inspect(doc):
     result['status'] = 'Adjust Price' if result['violations'] else 'Within Limit'
     result['message'] = ('Discount exceeds the permitted limit. Increase the selling price or reduce the discount.'
         if result['violations'] else f"All {len(result['lines'])} checked item lines are within their limits.")
-    if result['violations'] and not doc.is_new():
+    exceptions_enabled = approvals_allowed()
+    if result['violations'] and not exceptions_enabled:
+        result['message'] += ' Manager exceptions are disabled in VDM Settings.'
+    if exceptions_enabled and result['violations'] and not doc.is_new():
         if matching_approval(doc, result):
             result['status'] = 'Approved Exception'
             result['message'] = 'A Sales Manager explicitly approved an exception for these exact terms.'
-    if result['violations'] and result['status'] != 'Approved Exception':
+    if exceptions_enabled and result['violations'] and result['status'] != 'Approved Exception':
         from vortexus_discount_matrix.carry_forward import inherited_rows
         inherited = inherited_rows(doc, result['violations'], inspect, frappe)
         result['inherited_approvals'] = inherited
@@ -175,6 +187,8 @@ def preview(document):
 def approve(doctype, name, reason):
     if doctype not in DOCTYPES or not enabled():
         frappe.throw('Discount Matrix is not enabled for this document.')
+    if not approvals_allowed():
+        frappe.throw('Sales Manager discount exceptions are disabled in VDM Settings.')
     if 'Sales Manager' not in frappe.get_roles():
         frappe.throw('Only a Sales Manager can approve a discount exception.', frappe.PermissionError)
     reason = (reason or '').strip()
