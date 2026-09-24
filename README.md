@@ -161,3 +161,12 @@ VDM Settings now includes **Allow Sales Manager Discount Exceptions**, editable 
 When checked, an unchanged, valid approved document can submit without another approval; eligible source-document approvals can carry forward. Normal ERPNext submit permissions still apply. When unchecked, the manager approval button is removed on form refresh, the approval API rejects requests, and both direct and inherited approval records are ignored for exception enforcement. Sales above the matrix limits must be corrected. Existing approval audit records and submitted documents are not deleted or changed. Re-enabling the setting allows still-valid historical approvals again.
 
 The separate **Enable discount matrix enforcement** switch remains the master control. Turning enforcement off disables this app's price blocks altogether. To enforce strict limits with no exceptions, leave enforcement checked and uncheck only the manager-exceptions setting. Refresh open sales forms after changing settings; server checks take effect immediately.
+
+
+## Version 0.5.1: visible approval control and app sidebar
+
+The manager-exceptions checkbox now appears directly below enforcement, before customer mappings. Migration preserves the saved setting value and mappings.
+
+The app sidebar links to VDM Settings (including customer mappings), Discount Approvals, Items Outside Discount Matrix, Quotations, Sales Orders, Sales Invoices, Items, Item Groups, Customer Groups, Item Prices and Price Lists. Normal role permissions apply. Migration adds missing links without deleting existing links.
+
+Deploy version 0.5.1 and migrate the site in Frappe Cloud, then reload Desk. If the checkbox is still absent, confirm the deployed app version and successful site migration. Updating the repository alone does not update the live site.

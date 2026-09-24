@@ -45,6 +45,7 @@ def install():
     ]:
         if not any(f.fieldname == definition['fieldname'] for f in settings_type.fields):
             settings_type.append('fields', definition)
+    order_settings_fields(settings_type)
     settings_type.track_changes = 1
     settings_type.save(ignore_permissions=True)
     frappe.clear_cache(doctype='VDM Settings')
@@ -61,6 +62,7 @@ def install():
         settings.save(ignore_permissions=True)
     install_approval_view()
     install_transaction_fields()
+    install_sidebar()
 
 
 def install_transaction_fields():
@@ -91,3 +93,47 @@ def install_approval_view():
             df.read_only = 1
     approval.save(ignore_permissions=True)
     frappe.clear_cache(doctype='VDM Approval')
+
+
+def order_settings_fields(settings_type):
+    # Put controls before the long mapping grid on upgraded sites as well.
+    order = ['enabled', 'allow_manager_approvals', 'price_list',
+             'customer_mappings', 'mappings_initialized']
+    fields = list(settings_type.fields)
+    by_name = {df.fieldname: df for df in fields}
+    settings_type.set('fields', [by_name[name] for name in order if name in by_name]
+                      + [df for df in fields if df.fieldname not in order])
+    for df in settings_type.fields:
+        if df.fieldname == 'allow_manager_approvals':
+            df.hidden = 0
+
+
+def install_sidebar():
+    # Use the module title: v16 otherwise generates an ephemeral module sidebar.
+    title = 'Vortexus Discount Matrix'
+    if frappe.db.exists('Workspace Sidebar', title):
+        sidebar = frappe.get_doc('Workspace Sidebar', title)
+    else:
+        sidebar = frappe.get_doc(dict(doctype='Workspace Sidebar', title=title,
+                                     app='vortexus_discount_matrix', module=title,
+                                     header_icon='grid', standard=0, items=[]))
+    links = [
+        ('VDM Settings', 'DocType', 'VDM Settings', 'settings'),
+        ('Discount Approvals', 'DocType', 'VDM Approval', 'check'),
+        ('Items Outside Discount Matrix', 'Report', 'Items Outside Discount Matrix', 'table'),
+        ('Quotations', 'DocType', 'Quotation', 'file'),
+        ('Sales Orders', 'DocType', 'Sales Order', 'file'),
+        ('Sales Invoices', 'DocType', 'Sales Invoice', 'file'),
+        ('Items', 'DocType', 'Item', 'package'),
+        ('Item Groups', 'DocType', 'Item Group', 'folder'),
+        ('Customer Groups', 'DocType', 'Customer Group', 'users'),
+        ('Item Prices', 'DocType', 'Item Price', 'tag'),
+        ('Price Lists', 'DocType', 'Price List', 'list'),
+    ]
+    existing = {(row.link_type, row.link_to) for row in sidebar.items}
+    for label, link_type, link_to, icon in links:
+        if (link_type, link_to) not in existing:
+            sidebar.append('items', dict(type='Link', label=label, link_type=link_type,
+                                         link_to=link_to, icon=icon))
+    sidebar.save(ignore_permissions=True)
+    frappe.clear_cache()
