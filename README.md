@@ -138,3 +138,12 @@ Staging acceptance: approve and submit a 10-unit quotation at 150 for an item li
 VDM Approval displays the saved matrix lines as a read-only table with quantity/UOM, reference prices, discount ceiling, minimum and approved net unit prices, effective discount and exception highlighting. The original JSON remains stored unchanged and is available under View original approval data. Rendering uses historical snapshot values, not current Item Prices. Existing approvals work after migration; no approval records are rewritten.
 
 Deploy main, migrate the site, then refresh the browser. The migration adds an HTML display field and hides the original raw-text control. Test an existing approval with both compliant and exceptional lines; quantities must follow the original row number, including when some source items were outside the matrix.
+
+
+## Version 0.4: Items Outside Discount Matrix report
+
+After deployment and migration, search Desk for **Items Outside Discount Matrix**. Sales Managers and System Managers with Item read access can run the report. It reads current Item masters and compares their exact groups to the same accepted Item Group policy used by validation. It includes deliberately excluded groups and new/unmapped groups; it does not change their mappings.
+
+Columns: Item Code, Item Name, Item Group, Stock UOM, Sales Item, Disabled and Reason. By default all visible items, including disabled and nonsales items, are considered. Filter by exact Item Group, exclude disabled items, or select Sales Items Only. Summary cards count returned items and unmapped groups. Use the standard report export menu to download results.
+
+This is a group-coverage report, not a list of sales transactions exceeding discounts. It does not treat missing customer-group mappings or disabled enforcement as item-mapping failures. Item permissions apply. Verify report discovery and exports on staging after migration.
