@@ -177,3 +177,10 @@ Deploy version 0.5.1 and migrate the site in Frappe Cloud, then reload Desk. If 
 Both form scripts now begin with a statement separator. Without it, a preceding controller ending in `frappe.ui.form.on(...)` without a semicolon can be interpreted as calling that statement's return value, causing `TypeError: frappe.ui.form.on(...) is not a function` before the form renders. The regression test reproduces that failure and verifies transaction and approval scripts load safely after the same controller.
 
 Deploy this release with updated assets, migrate the site, and hard-refresh the browser. Discount enforcement and approval rules are unchanged.
+
+
+## Version 0.5.3: explicit settings repair migration
+
+An explicit post-model-sync patch runs the idempotent installer and verifies that the manager-approval field exists. The existing after-migrate hook remains in place. Approval-settings request failures now leave the form usable, hide approval actions and display an administrator-facing migration message; server-side enforcement is unchanged.
+
+Deploy this version and run a successful migration on the affected site. For an administrator with bench access, run `bench --site erp.vortexusindustrial.com migrate`, then reload Desk. If migration fails, inspect the first error in its log; browser cache clearing cannot create a missing DocField. Existing mapping values and an already configured approval switch are preserved.

@@ -2,4 +2,4 @@
 # No pre-model patches.
 
 [post_model_sync]
-# Settings upgrades are handled by the idempotent after_migrate hook.
+vortexus_discount_matrix.migrations.repair_approval_settings

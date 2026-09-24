@@ -52,7 +52,14 @@
         });
         frm.remove_custom_button(__('Approve Discount Exception'));
         if (!frm.is_new() && frm.doc.docstatus === 0 && frappe.user.has_role('Sales Manager')) {
-          const options = await frappe.call({method: method + 'approval_options'});
+          let options;
+          try {
+            options = await frappe.call({method: method + 'approval_options'});
+          } catch (error) {
+            frm.dashboard.set_headline_alert(__('Discount approval settings could not be loaded. Ask your System Manager to check the site migration. Discount limits remain enforced.'), 'red');
+            console.error('Discount approval settings could not be loaded', error);
+            return;
+          }
           if (options.message?.allow_approval) {
           frm.add_custom_button(__('Approve Discount Exception'), () => {
             if (frm.is_dirty()) return frappe.msgprint(__('Save your changes before approving.'));

@@ -106,3 +106,26 @@ class NavigationTests(unittest.TestCase):
         self.assertEqual(definition['app'], 'vortexus_discount_matrix')
         self.assertEqual(len(sidebar.items), 11)
         sidebar.save.assert_called_once_with(ignore_permissions=True)
+
+
+    def test_repair_patch_verifies_created_field_and_propagates_failure(self):
+        from unittest.mock import Mock
+        module_name = 'vortexus_discount_matrix.migrations.repair_approval_settings'
+        sys.modules.pop(module_name, None)
+        try:
+            with patch.object(self.setup, 'install') as install:
+                repair = importlib.import_module(module_name)
+                self.frappe.db.exists.return_value = True
+                repair.execute()
+                install.assert_called_once_with()
+                self.frappe.db.exists.assert_called_with('DocField', {
+                    'parent': 'VDM Settings', 'fieldname': 'allow_manager_approvals'})
+                self.frappe.db.exists.return_value = False
+                self.frappe.throw = Mock(side_effect=ValueError('upgrade failed'))
+                with self.assertRaisesRegex(ValueError, 'upgrade failed'):
+                    repair.execute()
+                install.side_effect = RuntimeError('installer failed')
+                with self.assertRaisesRegex(RuntimeError, 'installer failed'):
+                    repair.execute()
+        finally:
+            sys.modules.pop(module_name, None)
