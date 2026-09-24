@@ -20,3 +20,5 @@ doc_events = {
 doctype_js = {dt: "public/js/transaction.js" for dt in doc_events}
 
 doc_events['VDM Settings'] = {'validate': 'vortexus_discount_matrix.settings.validate'}
+
+doctype_js["VDM Approval"] = "public/js/approval.js"

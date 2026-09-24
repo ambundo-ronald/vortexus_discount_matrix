@@ -131,3 +131,10 @@ Carry-forward verifies a submitted, noncancelled source with a currently valid V
 Quotation approvals reach invoices through a Sales Order, using ERPNext's native links. Standalone invoices without sales-order item links do not inherit quotation approval. Existing approvals remain stored on their original document; the source is revalidated each time, and a cancelled or changed source does not provide a blanket exemption.
 
 Staging acceptance: approve and submit a 10-unit quotation at 150 for an item listed at 500; create a linked order at 150, submit it, and invoice 4 then 6 units without new approvals. Confirm an eleventh unit, price 149, another customer, a replaced row link and a cancelled source cannot inherit. Repeat starting with a directly approved order. Verify mixed approved/unapproved lines and your other pricing_rule app's behaviour.
+
+
+## Version 0.3.1: readable approved terms
+
+VDM Approval displays the saved matrix lines as a read-only table with quantity/UOM, reference prices, discount ceiling, minimum and approved net unit prices, effective discount and exception highlighting. The original JSON remains stored unchanged and is available under View original approval data. Rendering uses historical snapshot values, not current Item Prices. Existing approvals work after migration; no approval records are rewritten.
+
+Deploy main, migrate the site, then refresh the browser. The migration adds an HTML display field and hides the original raw-text control. Test an existing approval with both compliant and exceptional lines; quantities must follow the original row number, including when some source items were outside the matrix.

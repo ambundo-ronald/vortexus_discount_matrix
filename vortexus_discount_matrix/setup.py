@@ -53,6 +53,7 @@ def install():
                 settings.append('customer_mappings', {'customer_group': group, 'matrix_column': column})
         settings.mappings_initialized = 1
         settings.save(ignore_permissions=True)
+    install_approval_view()
     install_transaction_fields()
 
 
@@ -72,3 +73,15 @@ def install_transaction_fields():
         ignore_validate=True,
         update=True,
     )
+
+
+def install_approval_view():
+    approval = frappe.get_doc('DocType', 'VDM Approval')
+    if not any(f.fieldname == 'approved_terms_table' for f in approval.fields):
+        approval.append('fields', field('approved_terms_table', 'Approved Terms', 'HTML'))
+    for df in approval.fields:
+        if df.fieldname == 'snapshot':
+            df.hidden = 1
+            df.read_only = 1
+    approval.save(ignore_permissions=True)
+    frappe.clear_cache(doctype='VDM Approval')

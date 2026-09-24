@@ -23,5 +23,7 @@ jobs:
         run: node --check vortexus_discount_matrix/public/js/transaction.js
       - name: Button feedback tests
         run: node tests/test_buttons.js
+      - name: Approval table tests
+        run: node tests/test_approval_view.js
       - name: Build package
         run: python -m pip wheel --no-deps --wheel-dir dist .
