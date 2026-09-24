@@ -103,3 +103,35 @@ class EnforcementTests(unittest.TestCase):
     def test_string_zero_means_disabled(self):
         self.frappe.db.get_single_value.return_value = '0'
         self.assertFalse(self.v.enabled())
+
+    def test_quotation_approval_flows_through_order_to_invoice(self):
+        quote = self.scenario('Quotation')
+        quote.name = 'Q-1'
+        quote.docstatus = 1
+        quote.items[0].name = 'QI-1'
+        order = copy.deepcopy(quote)
+        order.doctype = 'Sales Order'
+        order.name = 'SO-1'
+        order.docstatus = 1
+        order.items[0].name = 'SOI-1'
+        order.items[0].prevdoc_docname = 'Q-1'
+        order.items[0].quotation_item = 'QI-1'
+        invoice = copy.deepcopy(order)
+        invoice.doctype = 'Sales Invoice'
+        invoice.name = 'SI-1'
+        invoice.docstatus = 0
+        invoice.items[0].sales_order = 'SO-1'
+        invoice.items[0].so_detail = 'SOI-1'
+        docs = {'Q-1': quote, 'SO-1': order, 'SI-1': invoice}
+        self.frappe.get_doc.side_effect = lambda *args: copy.deepcopy(args[0]) if isinstance(args[0], dict) else docs[args[1]]
+        self.frappe.db.sql.return_value = []
+        with self.inspect_patches():
+            approved_hash = self.v.inspect(quote)['fingerprint']
+            self.frappe.db.exists.side_effect = lambda dt, value: (value.get('reference_name') == 'Q-1' and value.get('fingerprint') == approved_hash) if dt == 'VDM Approval' else value in docs
+            self.v.before_submit(order)
+            self.assertEqual(order.custom_vdm_status, 'Inherited Exception')
+            self.v.before_submit(invoice)
+            self.assertEqual(invoice.custom_vdm_status, 'Inherited Exception')
+            invoice.items[0].rate = 149
+            with self.assertRaises(ValueError):
+                self.v.before_submit(invoice)

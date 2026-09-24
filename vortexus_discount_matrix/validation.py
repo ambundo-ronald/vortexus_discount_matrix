@@ -91,6 +91,15 @@ def inspect(doc):
         if frappe.db.exists('VDM Approval', {'reference_doctype': doc.doctype, 'reference_name': doc.name, 'fingerprint': result['fingerprint']}):
             result['status'] = 'Approved Exception'
             result['message'] = 'A Sales Manager explicitly approved an exception for these exact terms.'
+    if result['violations'] and result['status'] != 'Approved Exception':
+        from vortexus_discount_matrix.carry_forward import inherited_rows
+        inherited = inherited_rows(doc, result['violations'], inspect, frappe)
+        result['inherited_approvals'] = inherited
+        result['violations'] = [v for v in result['violations'] if v['row'] not in inherited]
+        if not result['violations']:
+            result['status'] = 'Inherited Exception'
+            references = sorted({v['source_doctype'] + ' ' + v['source_name'] for v in inherited.values()})
+            result['message'] = 'Approved discount carried forward from ' + ', '.join(references) + '. No additional approval is required.'
     return result
 
 

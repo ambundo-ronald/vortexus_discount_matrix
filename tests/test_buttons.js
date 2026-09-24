@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 
 (async () => {
-  for (const status of ['Disabled', 'Not Applicable', 'Within Limit', 'Adjust Price', 'Approved Exception']) {
+  for (const status of ['Disabled', 'Not Applicable', 'Within Limit', 'Adjust Price', 'Approved Exception', 'Inherited Exception']) {
     const handlers = {}, buttons = {}, dialogs = [];
     const frappe = {
       utils: {escape_html: value => value},
@@ -27,5 +27,5 @@ const assert = require('node:assert/strict');
     assert.ok(dialogs[0].message.includes(status));
     assert.equal(buttons['Approve Discount Exception'], undefined);
   }
-  console.log('Button checks passed for all five outcomes.');
+  console.log('Button checks passed for all six outcomes.');
 })().catch(error => {console.error(error); process.exitCode = 1;});

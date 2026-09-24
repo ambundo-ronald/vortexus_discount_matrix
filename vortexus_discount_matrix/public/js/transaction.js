@@ -4,7 +4,7 @@
   const isViolation = status => ['Adjust Price', 'Pending Approval'].includes(status);
 
   function render(frm, result, showDialog) {
-    const colors = {'Adjust Price': 'red', 'Pending Approval': 'red', 'Disabled': 'orange', 'Not Applicable': 'orange', 'Approved Exception': 'blue', 'Within Limit': 'green'};
+    const colors = {'Adjust Price': 'red', 'Pending Approval': 'red', 'Disabled': 'orange', 'Not Applicable': 'orange', 'Approved Exception': 'blue', 'Inherited Exception': 'blue', 'Within Limit': 'green'};
     const color = colors[result.status] || 'orange';
     let content = `<b>${escape(result.status)}</b><br>${escape(result.message)}`;
     if (result.lines?.length) {

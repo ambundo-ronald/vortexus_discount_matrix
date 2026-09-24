@@ -10,7 +10,7 @@ An installable Frappe app implementing the accepted Discount Matrix policy. It c
 - Standard Selling is an independent baseline. Direct price increases and discounts below the ceiling are allowed. This app does not automatically apply the maximum discount.
 - Item and document discounts are evaluated using ERPNext's recalculated net item rates and a Standard Selling baseline normalized through the same tax calculation.
 - Excessive discounts can be saved as drafts with an instruction to adjust the price; submission requires corrected prices or an explicit Sales Manager exception with a nonblank reason.
-- Approval is a separate, read-only audit record, bound to the document and its calculated terms. Copying documents does not carry authorization. Different prices, quantities, customer, taxes, baseline prices or limits require approval for those terms. An existing approval for identical terms on the same document remains valid.
+- Approval is a separate, read-only audit record, bound to the document and its calculated terms. Native source-row links can carry a verified upstream approval; copying status fields does not carry authorization. Different prices, quantities, customer, taxes, baseline prices or limits require approval for those terms. An existing approval for identical terms on the same document remains valid.
 - Browser warnings help salespeople; server checks protect normal saves/submissions through Desk, imports and document APIs. Direct database writes by administrators are outside document hooks.
 
 ## Installation on a Frappe Cloud private bench
@@ -51,7 +51,7 @@ Salespeople can edit rates normally. **Check Discount Matrix** previews limits; 
 
 The Sales Manager opens the saved draft, selects **Approve Discount Exception**, enters a reason and approves. The document displays **Approved Exception**. The manager or a user with existing submit permissions can then submit it. Managers cannot bypass the reason by submitting directly. The app adds no external notifications or automatic emails.
 
-Use **VDM Approval** to review the recorded reason, approver, time and approved snapshot. No custom Workflow is installed, so existing workflows still operate; staging must verify their interaction with the new buttons and submission check. Quotation, Order and Invoice each require their own exception approval.
+Use **VDM Approval** to review the recorded reason, approver, time and approved snapshot. No custom Workflow is installed, so existing workflows still operate; staging must verify their interaction with the new buttons and submission check. A submitted quotation approval can flow through its linked Sales Order to Sales Invoice. A submitted Sales Order approval can flow to its linked Sales Invoice.
 
 ## Explicit boundaries in version 0.1
 
@@ -72,7 +72,7 @@ Use a mapped group such as **Pool Pumps**, Dealers, and a Standard Selling rate 
 2. Additional invoice discounts that move the effective rate below 50,000 require approval. Test Net Total and Grand Total separately, and tax-inclusive and tax-exclusive documents.
 3. Editing the transaction price-list rate, item_group, customer_group or matrix status does not bypass the server check; master records and independent Item Prices govern.
 4. Sales Users cannot call the approval endpoint successfully. A Sales Manager without a reason is rejected. A manager with a reason can approve a saved draft; the audit record matches the transaction.
-5. Change quantity, customer, tax, rate, reference Item Price or policy after approval. Submission requires an approval matching the changed terms. Copy to a new Order/Invoice: copied fields cannot authorize it.
+5. Change quantity, customer, tax, rate, reference Item Price or policy after approval. Submission requires an approval matching the changed terms. Create linked Orders/Invoices: verified upstream approvals can authorize matching terms; copied status fields alone cannot.
 6. Exercise non-stock-UOM pricing, missing and overlapping prices, free rows, mixed mapped/excluded rows and each unsupported case above. Verify excluded groups remain outside this app's control.
 7. Confirm normal document API/import submissions hit the same block and ordinary users cannot create, edit or delete approval records.
 8. Check your existing workflows, PDF/email practices for unapproved draft quotations, and the Sales Order update-items-after-submit path. This app blocks submission, not all draft printing/sharing.
@@ -118,3 +118,16 @@ The Check Discount Matrix button always opens a result dialog, including Disable
 Before submission the server checks the current terms independently of displayed status. A second on_submit hook checks the persisted document within the submission transaction; a violation raises an exception to roll back submission. These checks still respect the enable setting and accepted scope: disabled enforcement or unmapped groups do not block sales. The dialog now explains those cases visibly.
 
 The reported 500-to-150 Technician scenario is tested against a mapped Water Treatment Equipment group (36% ceiling; minimum 320) for all three document types using controlled ERPNext tax doubles. Button tests cover all five outcomes. Actual site verification is still required, particularly with the installed pricing_rule overrides. The exact cause of the reported live submission cannot be established without its Item Group, saved settings, and deployed version.
+
+
+## Version 0.3: carry forward approved discounts
+
+Approve the quotation exception with a reason, submit the quotation, then use ERPNext's normal Create Sales Order flow. A linked order at the approved or higher final net unit prices needs no additional exception approval. Submit the order and create its Sales Invoice: the invoice can inherit through the order to the quotation. An explicitly approved Sales Order also authorizes its downstream invoices.
+
+The check shows **Inherited Exception** and identifies the source document. No new manager reason is requested. Ordinary ERPNext permissions and any other installed app's workflows still apply.
+
+Carry-forward verifies a submitted, noncancelled source with a currently valid VDM approval, the same customer, company and currency, the exact source child-row link and item, the same UOM/conversion, and equal or higher final net unit prices after additional discounts. Partial quantities are allowed; quantities across submitted downstream documents cannot exceed the source row. Duplicate target rows are counted together. Cancelled downstream documents no longer consume quantity; returns do not replenish it automatically. Invalid/missing links, extra discounts, changed items or exceeded quantities require price correction or a new explicit manager approval.
+
+Quotation approvals reach invoices through a Sales Order, using ERPNext's native links. Standalone invoices without sales-order item links do not inherit quotation approval. Existing approvals remain stored on their original document; the source is revalidated each time, and a cancelled or changed source does not provide a blanket exemption.
+
+Staging acceptance: approve and submit a 10-unit quotation at 150 for an item listed at 500; create a linked order at 150, submit it, and invoice 4 then 6 units without new approvals. Confirm an eleventh unit, price 149, another customer, a replaced row link and a cancelled source cannot inherit. Repeat starting with a directly approved order. Verify mixed approved/unapproved lines and your other pricing_rule app's behaviour.

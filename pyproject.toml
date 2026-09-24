@@ -1,6 +1,6 @@
 [project]
 name = "vortexus_discount_matrix"
-version = "0.2.1"
+version = "0.3.0"
 description = "Group-based discount ceilings and manager exceptions for ERPNext v16"
 authors = [{name = "Vortexus Industrial Solutions Limited"}]
 requires-python = ">=3.11"
