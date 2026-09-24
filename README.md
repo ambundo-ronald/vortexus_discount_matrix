@@ -170,3 +170,10 @@ The manager-exceptions checkbox now appears directly below enforcement, before c
 The app sidebar links to VDM Settings (including customer mappings), Discount Approvals, Items Outside Discount Matrix, Quotations, Sales Orders, Sales Invoices, Items, Item Groups, Customer Groups, Item Prices and Price Lists. Normal role permissions apply. Migration adds missing links without deleting existing links.
 
 Deploy version 0.5.1 and migrate the site in Frappe Cloud, then reload Desk. If the checkbox is still absent, confirm the deployed app version and successful site migration. Updating the repository alone does not update the live site.
+
+
+## Version 0.5.2: prevent blank forms when scripts are combined
+
+Both form scripts now begin with a statement separator. Without it, a preceding controller ending in `frappe.ui.form.on(...)` without a semicolon can be interpreted as calling that statement's return value, causing `TypeError: frappe.ui.form.on(...) is not a function` before the form renders. The regression test reproduces that failure and verifies transaction and approval scripts load safely after the same controller.
+
+Deploy this release with updated assets, migrate the site, and hard-refresh the browser. Discount enforcement and approval rules are unchanged.

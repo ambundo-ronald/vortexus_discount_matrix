@@ -1,4 +1,4 @@
-(() => {
+;(() => {
   const esc = value => frappe.utils.escape_html(String(value ?? ''));
   function number(value, percent = false) {
     if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value))) return '?';

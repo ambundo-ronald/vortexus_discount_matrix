@@ -1,4 +1,4 @@
-(() => {
+;(() => {
   const method = 'vortexus_discount_matrix.validation.';
   const escape = value => frappe.utils.escape_html(String(value ?? ''));
   const isViolation = status => ['Adjust Price', 'Pending Approval'].includes(status);
