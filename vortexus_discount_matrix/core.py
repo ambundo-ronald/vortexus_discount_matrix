@@ -64,3 +64,41 @@ def mapping_from_rows(rows):
             raise ValueError(f'Customer Group {group} is mapped more than once.')
         result[group] = column
     return result
+
+
+NUMERIC_TERMS = set('row qty conversion_factor rate net_rate net_amount discount_percentage discount_amount additional_discount_percentage conversion_rate reference_price reference_net_rate max_discount minimum_net_rate actual_net_rate effective_discount tax_amount included_in_print_rate row_id'.split())
+
+
+def canonical_terms(value, key=None):
+    if isinstance(value, dict):
+        return {k: canonical_terms(v, k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [canonical_terms(v) for v in value]
+    if key == 'item_tax_rate' and isinstance(value, str) and value.strip():
+        try:
+            rates = json.loads(value)
+            return {k: str(decimal(v).normalize()) for k, v in sorted(rates.items())}
+        except (ValueError, TypeError, AttributeError):
+            return value
+    if value is None or value == '':
+        return None
+    if key in NUMERIC_TERMS:
+        return str(decimal(value).normalize())
+    return str(value) if not isinstance(value, str) else value
+
+
+def terms_fingerprint(snapshot):
+    return fingerprint(canonical_terms(snapshot))
+
+
+def changed_term_paths(previous, current, path=''):
+    previous, current = canonical_terms(previous), canonical_terms(current)
+    def walk(a, b, p):
+        if a == b:
+            return []
+        if isinstance(a, dict) and isinstance(b, dict):
+            return [x for k in sorted(set(a) | set(b)) for x in walk(a.get(k), b.get(k), f'{p}.{k}' if p else k)]
+        if isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+            return [x for i, (left, right) in enumerate(zip(a, b), 1) for x in walk(left, right, f'{p}[{i}]')]
+        return [p]
+    return walk(previous, current, path)

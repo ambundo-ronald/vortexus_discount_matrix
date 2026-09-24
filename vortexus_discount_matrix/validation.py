@@ -2,7 +2,7 @@ import json
 import frappe
 from frappe.utils import flt
 from erpnext.controllers.taxes_and_totals import calculate_taxes_and_totals
-from vortexus_discount_matrix.core import limit, minimum_price, effective_discount, fingerprint, policy
+from vortexus_discount_matrix.core import limit, minimum_price, effective_discount, fingerprint, policy, terms_fingerprint, changed_term_paths
 from vortexus_discount_matrix.prices import reference_rate
 
 DOCTYPES = ('Quotation', 'Sales Order', 'Sales Invoice')
@@ -83,12 +83,12 @@ def inspect(doc):
         items=[pick(r, 'item_code qty uom conversion_factor rate net_rate net_amount discount_percentage discount_amount warehouse item_tax_template item_tax_rate quotation quotation_item prevdoc_docname sales_order so_detail') for r in doc.items],
         taxes=[pick(r, 'charge_type account_head rate tax_amount included_in_print_rate row_id add_deduct_tax category') for r in doc.get('taxes', [])])
     result['snapshot'] = snapshot
-    result['fingerprint'] = fingerprint(snapshot)
+    result['fingerprint'] = terms_fingerprint(snapshot)
     result['status'] = 'Adjust Price' if result['violations'] else 'Within Limit'
     result['message'] = ('Discount exceeds the permitted limit. Increase the selling price or reduce the discount.'
         if result['violations'] else f"All {len(result['lines'])} checked item lines are within their limits.")
     if result['violations'] and not doc.is_new():
-        if frappe.db.exists('VDM Approval', {'reference_doctype': doc.doctype, 'reference_name': doc.name, 'fingerprint': result['fingerprint']}):
+        if matching_approval(doc, result):
             result['status'] = 'Approved Exception'
             result['message'] = 'A Sales Manager explicitly approved an exception for these exact terms.'
     if result['violations'] and result['status'] != 'Approved Exception':
@@ -103,8 +103,32 @@ def inspect(doc):
     return result
 
 
+def matching_approval(doc, result):
+    filters = {'reference_doctype': doc.doctype, 'reference_name': doc.name}
+    if frappe.db.exists('VDM Approval', {**filters, 'fingerprint': result['fingerprint']}):
+        return True
+    # Existing records retain their original hashes and snapshots. Compare
+    # equivalent representations without rewriting the historical audit data.
+    records = frappe.get_all('VDM Approval', filters=filters,
+        fields=['name', 'snapshot'], order_by='creation desc')
+    for index, record in enumerate(records):
+        try:
+            old = json.loads(record['snapshot'])
+            if not isinstance(old, dict):
+                continue
+            if terms_fingerprint(old) == result['fingerprint']:
+                return True
+            if index == 0:
+                paths = changed_term_paths(old, result['snapshot'])[:6]
+                result['approval_mismatch'] = 'Previous approval no longer matches these terms: ' + ', '.join(paths) + '.'
+        except (ValueError, TypeError):
+            continue
+    return False
+
+
 def summary(result):
-    return '\n'.join(f"Row {r['row']} ({r['item_code']}): maximum discount {r['max_discount']:g}%; minimum net unit price {r['minimum_net_rate']:g}; entered net unit price {r['actual_net_rate']:g}." for r in result['violations'])
+    details = '\n'.join(f"Row {r['row']} ({r['item_code']}): maximum discount {r['max_discount']:g}%; minimum net unit price {r['minimum_net_rate']:g}; entered net unit price {r['actual_net_rate']:g}." for r in result['violations'])
+    return details + ('\n' + result['approval_mismatch'] if result.get('approval_mismatch') else '')
 
 
 def validate(doc, method=None):
@@ -165,9 +189,12 @@ def approve(doctype, name, reason):
     result = inspect(doc)
     if not result['violations']:
         frappe.throw('This document does not require a discount exception.')
+    # Persist controller recalculations before recording the terms approved.
+    doc.save()
+    result = inspect(frappe.get_doc(doctype, name))
     approval = frappe.get_doc(dict(doctype='VDM Approval', reference_doctype=doctype, reference_name=name,
         fingerprint=result['fingerprint'], reason=reason, approved_by=frappe.session.user,
         approved_at=frappe.utils.now_datetime(), snapshot=json.dumps(result['snapshot'], default=str)))
     approval.insert(ignore_permissions=True)
-    doc.save()
+    doc.db_set({'custom_vdm_status': 'Approved Exception', 'custom_vdm_summary': summary(result)}, update_modified=False)
     return approval.name

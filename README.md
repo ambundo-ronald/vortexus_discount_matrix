@@ -147,3 +147,8 @@ After deployment and migration, search Desk for **Items Outside Discount Matrix*
 Columns: Item Code, Item Name, Item Group, Stock UOM, Sales Item, Disabled and Reason. By default all visible items, including disabled and nonsales items, are considered. Filter by exact Item Group, exclude disabled items, or select Sales Items Only. Summary cards count returned items and unmapped groups. Use the standard report export menu to download results.
 
 This is a group-coverage report, not a list of sales transactions exceeding discounts. It does not treat missing customer-group mappings or disabled enforcement as item-mapping failures. Item permissions apply. Verify report discovery and exports on staging after migration.
+
+
+## Version 0.4.1: stable approval comparison
+
+Approval comparison now normalizes equivalent numeric representations (for example 1 and 1.0), blank optional values and item-tax JSON formatting. It does not round away price or quantity changes. Old approval records are compared using their saved snapshots without rewriting audit data. Approvals are recorded after the document save/reload, and rejection messages identify changed snapshot paths when a previous approval exists. The actual cause of a specific rejection still requires comparison with that document's saved approval terms.

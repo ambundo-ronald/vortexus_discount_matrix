@@ -23,6 +23,7 @@ class ApprovalTests(unittest.TestCase):
         frappe.utils.now_datetime = lambda: '2026-09-21 12:00:00'
         frappe.utils.getdate = lambda v: v
         frappe.get_doc = Mock()
+        frappe.get_all = Mock(return_value=[])
         taxes = types.ModuleType('erpnext.controllers.taxes_and_totals')
         taxes.calculate_taxes_and_totals = Mock()
         details = types.ModuleType('erpnext.stock.get_item_details')
@@ -59,11 +60,11 @@ class ApprovalTests(unittest.TestCase):
     def test_approval_reads_saved_doc_and_records_reason(self):
         doc = Mock(docstatus=0)
         approval = Mock()
-        self.frappe.get_doc.side_effect = [doc, approval]
-        with patch.object(self.v, 'inspect', return_value={'violations': [1], 'fingerprint': 'terms', 'snapshot': {'price': 55}}):
+        self.frappe.get_doc.side_effect = [doc, doc, approval]
+        with patch.object(self.v, 'inspect', return_value={'violations': [{'row': 1, 'item_code': 'ITEM', 'max_discount': 30, 'minimum_net_rate': 350, 'actual_net_rate': 150}], 'fingerprint': 'terms', 'snapshot': {'price': 55}}):
             self.v.approve('Sales Order', 'SO-1', '  Contract exception  ')
         doc.check_permission.assert_called_once_with('write')
-        payload = self.frappe.get_doc.call_args_list[1].args[0]
+        payload = self.frappe.get_doc.call_args_list[2].args[0]
         self.assertEqual(payload['reason'], 'Contract exception')
         self.assertEqual(payload['approved_by'], 'manager@example.test')
         self.assertEqual(payload['fingerprint'], 'terms')
@@ -87,3 +88,20 @@ class ApprovalTests(unittest.TestCase):
         with patch.object(self.v, 'inspect') as inspect:
             self.v.validate(types.SimpleNamespace())
             inspect.assert_not_called()
+
+    def test_legacy_snapshot_matches_equivalent_current_terms(self):
+        import json
+        from vortexus_discount_matrix.core import terms_fingerprint
+        self.frappe.db.exists.return_value = False
+        self.frappe.get_all.return_value = [{'name': 'OLD', 'snapshot': json.dumps({'items': [{'qty': 1.0}]})}]
+        result = {'snapshot': {'items': [{'qty': 1}]}, 'fingerprint': terms_fingerprint({'items': [{'qty': 1}]})}
+        self.assertTrue(self.v.matching_approval(types.SimpleNamespace(doctype='Sales Order', name='SO-1'), result))
+
+    def test_changed_terms_produce_useful_mismatch(self):
+        import json
+        from vortexus_discount_matrix.core import terms_fingerprint
+        self.frappe.db.exists.return_value = False
+        self.frappe.get_all.return_value = [{'name': 'OLD', 'snapshot': json.dumps({'items': [{'rate': 200}]})}]
+        result = {'snapshot': {'items': [{'rate': 150}]}, 'fingerprint': terms_fingerprint({'items': [{'rate': 150}]})}
+        self.assertFalse(self.v.matching_approval(types.SimpleNamespace(doctype='Sales Order', name='SO-1'), result))
+        self.assertIn('items[1].rate', result['approval_mismatch'])

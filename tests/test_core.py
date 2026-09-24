@@ -57,3 +57,19 @@ class MatrixTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class StableApprovalTests(unittest.TestCase):
+    def test_equivalent_representations_preserve_approval(self):
+        from vortexus_discount_matrix.core import terms_fingerprint
+        a = {'document': '001', 'items': [{'qty': 1, 'rate': 220.22, 'warehouse': None, 'item_tax_rate': '{"VAT":16.0}'}]}
+        b = {'document': '001', 'items': [{'qty': 1.0, 'rate': '220.220', 'warehouse': '', 'item_tax_rate': '{ "VAT": 16 }'}]}
+        self.assertEqual(terms_fingerprint(a), terms_fingerprint(b))
+
+    def test_real_changes_are_not_normalized_away(self):
+        from vortexus_discount_matrix.core import terms_fingerprint, changed_term_paths
+        a = {'items': [{'qty': 1, 'rate': 220.22}], 'document': '001'}
+        b = {'items': [{'qty': 1, 'rate': 220.21}], 'document': '001'}
+        self.assertNotEqual(terms_fingerprint(a), terms_fingerprint(b))
+        self.assertEqual(changed_term_paths(a, b), ['items[1].rate'])
+        self.assertNotEqual(terms_fingerprint(a), terms_fingerprint({**a, 'document': '1'}))
