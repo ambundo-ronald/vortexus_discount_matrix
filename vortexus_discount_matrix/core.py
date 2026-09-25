@@ -71,6 +71,15 @@ NUMERIC_TERMS = set('row qty conversion_factor rate net_rate net_amount discount
 
 def canonical_terms(value, key=None):
     if isinstance(value, dict):
+        # Quotation persists its Customer in party_name. The selling controller
+        # may also populate a transient customer alias during validation.
+        # Normalize only a blank/matching alias, never a conflicting identity.
+        header = value.get('header')
+        if value.get('doctype') == 'Quotation' and isinstance(header, dict):
+            party = header.get('party_name')
+            if (header.get('quotation_to') == 'Customer' and party
+                    and header.get('customer') in (None, '', party)):
+                value = {**value, 'header': {**header, 'customer': party}}
         return {k: canonical_terms(v, k) for k, v in value.items()}
     if isinstance(value, list):
         return [canonical_terms(v) for v in value]

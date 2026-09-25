@@ -73,3 +73,16 @@ class StableApprovalTests(unittest.TestCase):
         self.assertNotEqual(terms_fingerprint(a), terms_fingerprint(b))
         self.assertEqual(changed_term_paths(a, b), ['items[1].rate'])
         self.assertNotEqual(terms_fingerprint(a), terms_fingerprint({**a, 'document': '1'}))
+
+
+    def test_customer_alias_normalization_is_scoped_and_rejects_conflicts(self):
+        from vortexus_discount_matrix.core import terms_fingerprint
+        base = {'doctype': 'Quotation', 'header': {
+            'quotation_to': 'Customer', 'party_name': 'C-1', 'customer': None}}
+        matching = {**base, 'header': {**base['header'], 'customer': 'C-1'}}
+        self.assertEqual(terms_fingerprint(base), terms_fingerprint(matching))
+        conflicting = {**base, 'header': {**base['header'], 'customer': 'C-2'}}
+        self.assertNotEqual(terms_fingerprint(base), terms_fingerprint(conflicting))
+        for dt in ['Sales Order', 'Sales Invoice']:
+            self.assertNotEqual(terms_fingerprint({**base, 'doctype': dt}),
+                                terms_fingerprint({**matching, 'doctype': dt}))

@@ -184,3 +184,8 @@ Deploy this release with updated assets, migrate the site, and hard-refresh the 
 An explicit post-model-sync patch runs the idempotent installer and verifies that the manager-approval field exists. The existing after-migrate hook remains in place. Approval-settings request failures now leave the form usable, hide approval actions and display an administrator-facing migration message; server-side enforcement is unchanged.
 
 Deploy this version and run a successful migration on the affected site. For an administrator with bench access, run `bench --site erp.vortexusindustrial.com migrate`, then reload Desk. If migration fails, inspect the first error in its log; browser cache clearing cannot create a missing DocField. Existing mapping values and an already configured approval switch are preserved.
+
+
+## Version 0.5.4: quotation customer identity comparison
+
+Customer quotations compare blank or matching transient `customer` aliases using the saved `party_name`. This applies to historical approval snapshots without rewriting them. Conflicting customer aliases, changes to quotation_to/party_name, and changes to prices or other approved terms still invalidate approval. Sales Order and Sales Invoice comparisons are unchanged. Deploy and migrate, then retry the unchanged approved quotation.

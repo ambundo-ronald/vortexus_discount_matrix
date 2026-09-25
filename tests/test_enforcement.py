@@ -153,3 +153,29 @@ class EnforcementTests(unittest.TestCase):
             self.v.before_submit(doc)
             self.v.on_submit(doc)
             self.assertEqual(doc.custom_vdm_status, 'Approved Exception')
+
+
+    def test_quotation_legacy_approval_survives_transient_customer_alias(self):
+        import json
+        doc = self.scenario('Quotation')
+        doc.customer = None
+        with self.inspect_patches():
+            approved = self.v.inspect(doc)['snapshot']
+            original = json.dumps(approved, default=str)
+            self.frappe.get_all.return_value = [{'name': 'APPROVAL-1', 'snapshot': original}]
+            doc.customer = doc.party_name
+            self.v.before_submit(doc)
+            self.assertEqual(doc.custom_vdm_status, 'Approved Exception')
+            self.assertEqual(json.dumps(approved, default=str), original)
+            doc.customer = None
+            self.v.on_submit(doc)
+            # A real customer change must still require new approval.
+            doc.party_name = 'CUSTOMER-2'
+            doc.customer = 'CUSTOMER-2'
+            with self.assertRaisesRegex(ValueError, 'party_name'):
+                self.v.before_submit(doc)
+            doc.party_name = 'CUSTOMER-1'
+            doc.customer = None
+            doc.items[0].rate = 140
+            with self.assertRaises(ValueError):
+                self.v.before_submit(doc)
