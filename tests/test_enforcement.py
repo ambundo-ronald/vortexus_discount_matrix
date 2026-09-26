@@ -179,3 +179,25 @@ class EnforcementTests(unittest.TestCase):
             doc.items[0].rate = 140
             with self.assertRaises(ValueError):
                 self.v.before_submit(doc)
+
+
+    def test_foreign_currency_floor_and_approval_recheck_for_all_documents(self):
+        import json
+        for doctype in self.v.DOCTYPES:
+            doc = self.scenario(doctype, rate=3.20)
+            doc.currency = 'USD'
+            # KES 500 converted at 0.01 USD/KES gives USD 5 reference.
+            with self.inspect_patches(), patch.object(self.v, 'reference_rate', return_value=(5, 'PRICE-1')):
+                self.v.before_submit(doc)
+                self.assertEqual(doc.custom_vdm_status, 'Within Limit')
+                doc.items[0].rate = 3.19
+                with self.assertRaises(ValueError):
+                    self.v.before_submit(doc)
+                approved = self.v.inspect(doc)['snapshot']
+                self.frappe.get_all.return_value = [{'name': 'FX-APPROVAL', 'snapshot': json.dumps(approved)}]
+                self.v.before_submit(doc)
+                self.assertEqual(doc.custom_vdm_status, 'Approved Exception')
+                with patch.object(self.v, 'reference_rate', return_value=(6, 'PRICE-1')):
+                    with self.assertRaises(ValueError):
+                        self.v.before_submit(doc)
+            self.frappe.get_all.return_value = []

@@ -1,7 +1,7 @@
 import importlib
 import types
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import test_approval
 
 
@@ -60,8 +60,58 @@ class PriceTests(unittest.TestCase):
         self.frappe.db.get_value.side_effect = lambda dt, name, field: 'Nos' if field == 'stock_uom' else 10
         self.assertEqual(self.prices.reference_rate(doc, row), (1000000, 'PRICE-1'))
 
-    def test_cross_currency_fails_explicitly(self):
+
+    def exchange_module(self, rate):
+        module = types.ModuleType('erpnext.setup.utils')
+        module.get_exchange_rate = Mock(return_value=rate)
+        return module
+
+    def test_cross_currency_uses_server_selling_rate_and_reference_currency(self):
+        import sys
         doc, row = self.inputs()
         doc.currency = 'USD'
-        with self.assertRaisesRegex(ValueError, 'currency'):
+        doc.conversion_rate = 999
+        doc.plc_conversion_rate = 999
+        module = self.exchange_module(0.008)
+        with patch.dict(sys.modules, {module.__name__: module}):
+            self.assertEqual(self.prices.reference_rate(doc, row), (800, 'PRICE-1'))
+        module.get_exchange_rate.assert_called_once_with('KES', 'USD', '2026-09-21', args='for_selling')
+
+    def test_cross_currency_and_uom_conversion(self):
+        import sys
+        doc, row = self.inputs()
+        doc.currency = 'EUR'
+        row.uom = 'Box'
+        row.conversion_factor = 10
+        self.frappe.db.get_value.side_effect = lambda dt, name, field: 'Nos' if field == 'stock_uom' else 10
+        module = self.exchange_module(0.007)
+        with patch.dict(sys.modules, {module.__name__: module}):
+            self.assertEqual(self.prices.reference_rate(doc, row), (7000, 'PRICE-1'))
+
+    def test_missing_or_invalid_exchange_rate_blocks(self):
+        import sys
+        for rate in [None, 0, -1, float('nan'), float('inf')]:
+            doc, row = self.inputs()
+            doc.currency = 'USD'
+            module = self.exchange_module(rate)
+            with patch.dict(sys.modules, {module.__name__: module}):
+                with self.assertRaisesRegex(ValueError, 'no valid selling exchange rate'):
+                    self.prices.reference_rate(doc, row)
+
+    def test_same_currency_does_not_fetch_exchange_rate(self):
+        import sys
+        doc, row = self.inputs()
+        module = self.exchange_module(999)
+        with patch.dict(sys.modules, {module.__name__: module}):
+            self.assertEqual(self.prices.reference_rate(doc, row), (100000, 'PRICE-1'))
+        module.get_exchange_rate.assert_not_called()
+
+    def test_invoice_uses_posting_date(self):
+        import sys
+        doc, row = self.inputs()
+        doc.currency = 'USD'
+        doc.get.side_effect = lambda key: {'posting_date': '2026-09-25'}.get(key)
+        module = self.exchange_module(0.008)
+        with patch.dict(sys.modules, {module.__name__: module}):
             self.prices.reference_rate(doc, row)
+        module.get_exchange_rate.assert_called_once_with('KES', 'USD', '2026-09-25', args='for_selling')

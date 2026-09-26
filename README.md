@@ -55,7 +55,7 @@ Use **VDM Approval** to review the recorded reason, approver, time and approved 
 
 ## Explicit boundaries in version 0.1
 
-- Standard Selling and transaction currencies must match. Cross-currency transactions involving mapped groups stop with an explanatory error.
+- Foreign-currency transactions use a server-resolved ERPNext selling exchange rate for the document date to convert Standard Selling reference prices. Missing or invalid rates block the transaction with an explanatory error.
 - Standard Selling must contain a positive, general selling price valid on the document date, for the exact UOM or stock UOM. Item-master UOM conversion is validated. Customer/batch-specific prices do not replace the baseline. Multiple equally current prices are treated as ambiguous. Packing units other than 0 or 1 require review.
 - Returns, consolidated invoices, nonpositive quantities and alternative quotation rows involving mapped items are not supported yet and stop for review. Cash/non-trade discounts must be replaced with regular additional discounts.
 - A mapped Item Group on a lead quotation requires selection of a Customer; otherwise its discount ceiling cannot be determined.
@@ -189,3 +189,16 @@ Deploy this version and run a successful migration on the affected site. For an 
 ## Version 0.5.4: quotation customer identity comparison
 
 Customer quotations compare blank or matching transient `customer` aliases using the saved `party_name`. This applies to historical approval snapshots without rewriting them. Conflicting customer aliases, changes to quotation_to/party_name, and changes to prices or other approved terms still invalidate approval. Sales Order and Sales Invoice comparisons are unchanged. Deploy and migrate, then retry the unchanged approved quotation.
+
+
+## Version 0.6: multi-currency transactions
+
+Quotations, Sales Orders and Sales Invoices can use a different currency from Standard Selling. Item Prices remain in the Standard Selling currency. The app multiplies the reference price by ERPNext's server-resolved selling exchange rate from that currency to the document currency, using transaction_date or posting_date, then applies the existing discount ceiling to the resulting net reference price. UOM conversion and additional discounts remain included.
+
+Example: a KES 13,000 reference at KES-to-USD 0.007692307692 converts to approximately USD 100. A 30% ceiling means a USD 70 minimum net price. Transaction conversion_rate and plc_conversion_rate are not the source of the matrix reference conversion.
+
+Set up Currency Exchange for the direction Standard Selling currency -> transaction currency, with For Selling enabled and a date valid under Accounts Settings' stale-rate rules. ERPNext's configured exchange-rate provider may supply a rate when no suitable stored rate exists. Missing, zero, negative or non-finite rates block checking/saving/submitting; a discount exception cannot replace a missing rate. The app does not add inverse-rate or cross-rate inference beyond ERPNext's resolver.
+
+Approvals retain the converted reference price and currency in their snapshots. A changed converted reference price invalidates the previous approval and requires review. Native approval carry-forward still requires the same transaction currency between source and target; switching the target currency requires its own approval when outside limits. Existing same-currency behavior is unchanged.
+
+Deploy and migrate, then refresh. Before live use, verify one foreign-currency quotation/order/invoice with your exchange rates and taxes, a price at the limit, a price below it, manager approval, and a linked order/invoice in the same currency. Tests use controlled adapters; this release has not been exercised on your live site.
