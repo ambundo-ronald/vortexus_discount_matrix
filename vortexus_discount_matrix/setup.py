@@ -62,6 +62,7 @@ def install():
         settings.save(ignore_permissions=True)
     install_approval_view()
     install_transaction_fields()
+    install_lead_fields()
     install_sidebar()
 
 
@@ -137,3 +138,11 @@ def install_sidebar():
                                          link_to=link_to, icon=icon))
     sidebar.save(ignore_permissions=True)
     frappe.clear_cache()
+
+
+def install_lead_fields():
+    create_custom_fields({'Lead': [field(
+        'custom_customer_group', 'Customer Group', 'Link', options='Customer Group',
+        insert_after='lead_name',
+        description='Used by Discount Matrix for quotations addressed to this Lead. Select before quoting matrix-controlled items.',
+    )]}, ignore_validate=True, update=True)

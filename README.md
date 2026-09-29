@@ -202,3 +202,12 @@ Set up Currency Exchange for the direction Standard Selling currency -> transact
 Approvals retain the converted reference price and currency in their snapshots. A changed converted reference price invalidates the previous approval and requires review. Native approval carry-forward still requires the same transaction currency between source and target; switching the target currency requires its own approval when outside limits. Existing same-currency behavior is unchanged.
 
 Deploy and migrate, then refresh. Before live use, verify one foreign-currency quotation/order/invoice with your exchange rates and taxes, a price at the limit, a price below it, manager approval, and a linked order/invoice in the same currency. Tests use controlled adapters; this release has not been exercised on your live site.
+
+
+## Version 0.7: Lead quotation customer groups
+
+Lead now has an optional Customer Group link (`custom_customer_group`) below the lead name. Select a Customer Group mapped in VDM Settings before quoting matrix-controlled items directly to a Lead. The server reads the saved Lead group, applies the same item-group limits, and supports explicit manager exceptions. A missing group blocks controlled quotations with an instruction to update the Lead; explicitly unmapped groups remain outside enforcement, as with Customers. Lead editing permissions govern who can change this field.
+
+Approvals remain bound to the Lead, group and approved terms. Changing the Lead or its mapped group invalidates the approval. On conversion to a Customer, select the correct Customer Group on the Customer: it is not automatically copied by this release. Sales Orders use the actual Customer group. Lead-addressed quotation approvals do not automatically carry forward to Customer sales orders; an over-limit order needs its own approval. Existing Customer quotation carry-forward is unchanged.
+
+Deploy, migrate and refresh. Test a Lead quotation at the limit and below it, a missing Lead group, manager approval, and a converted Customer order on staging.

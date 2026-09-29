@@ -201,3 +201,47 @@ class EnforcementTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         self.v.before_submit(doc)
             self.frappe.get_all.return_value = []
+
+
+    def test_lead_quotation_uses_lead_group_and_checks_limits(self):
+        doc = self.scenario('Quotation', rate=320)
+        doc.quotation_to = 'Lead'
+        doc.party_name = 'LEAD-1'
+        doc.customer = None
+        with self.inspect_patches():
+            self.v.before_submit(doc)
+            self.assertEqual(doc.custom_vdm_status, 'Within Limit')
+            self.assertIn(unittest.mock.call('Lead', 'LEAD-1', 'custom_customer_group'),
+                          self.frappe.db.get_value.call_args_list)
+            doc.items[0].rate = 150
+            with self.assertRaises(ValueError):
+                self.v.before_submit(doc)
+
+    def test_lead_requires_group_for_mapped_items(self):
+        doc = self.scenario('Quotation')
+        doc.quotation_to = 'Lead'
+        self.frappe.db.get_value.side_effect = lambda dt, name, field: 'Ro Systems' if dt == 'Item' else None
+        with self.inspect_patches(), self.assertRaisesRegex(ValueError, 'Set Customer Group on the Lead'):
+            self.v.before_submit(doc)
+
+    def test_lead_approval_stays_bound_to_lead_and_group(self):
+        import json
+        doc = self.scenario('Quotation')
+        doc.quotation_to = 'Lead'
+        doc.party_name = 'LEAD-1'
+        doc.customer = None
+        with self.inspect_patches():
+            snapshot = self.v.inspect(doc)['snapshot']
+            self.frappe.get_all.return_value = [{'name': 'APPROVAL', 'snapshot': json.dumps(snapshot)}]
+            doc.customer = 'transient alias'
+            self.v.before_submit(doc)
+            self.assertEqual(doc.custom_vdm_status, 'Approved Exception')
+            doc.party_name = 'LEAD-2'
+            with self.assertRaises(ValueError):
+                self.v.before_submit(doc)
+            doc.party_name = 'LEAD-1'
+            import vortexus_discount_matrix.settings as settings
+            settings.customer_mappings = lambda: {'Dealers': 'Dealers'}
+            self.frappe.db.get_value.side_effect = lambda dt, name, field: 'Ro Systems' if dt == 'Item' else 'Dealers'
+            with self.assertRaises(ValueError):
+                self.v.before_submit(doc)

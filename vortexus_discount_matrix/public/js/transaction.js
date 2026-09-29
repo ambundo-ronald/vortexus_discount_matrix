@@ -83,7 +83,7 @@
       },
       currency: schedule, conversion_rate: schedule, plc_conversion_rate: schedule,
       transaction_date: schedule, posting_date: schedule,
-      customer: schedule, party_name: schedule, additional_discount_percentage: schedule,
+      quotation_to: schedule, customer: schedule, party_name: schedule, additional_discount_percentage: schedule,
       discount_amount: schedule, apply_discount_on: schedule,
     });
     frappe.ui.form.on(dt + ' Item', {

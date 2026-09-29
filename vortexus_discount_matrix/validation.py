@@ -24,8 +24,16 @@ def approval_options():
 def customer_group(doc):
     customer = doc.get('customer')
     if doc.doctype == 'Quotation':
+        if doc.get('quotation_to') == 'Lead':
+            lead = doc.get('party_name')
+            if not lead:
+                frappe.throw('Select a Lead before checking Discount Matrix.')
+            group = frappe.db.get_value('Lead', lead, 'custom_customer_group')
+            if not group:
+                frappe.throw('Set Customer Group on the Lead before checking Discount Matrix.')
+            return group
         if doc.get('quotation_to') != 'Customer':
-            frappe.throw('Select a Customer on this quotation so Discount Matrix can determine the customer group.')
+            frappe.throw('Discount Matrix supports quotations to a Customer or Lead.')
         customer = doc.get('party_name')
     if not customer:
         frappe.throw('Select a Customer before checking Discount Matrix.')
