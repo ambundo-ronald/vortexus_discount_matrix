@@ -211,3 +211,10 @@ Lead now has an optional Customer Group link (`custom_customer_group`) below the
 Approvals remain bound to the Lead, group and approved terms. Changing the Lead or its mapped group invalidates the approval. On conversion to a Customer, select the correct Customer Group on the Customer: it is not automatically copied by this release. Sales Orders use the actual Customer group. Lead-addressed quotation approvals do not automatically carry forward to Customer sales orders; an over-limit order needs its own approval. Existing Customer quotation carry-forward is unchanged.
 
 Deploy, migrate and refresh. Test a Lead quotation at the limit and below it, a missing Lead group, manager approval, and a converted Customer order on staging.
+
+
+## Version 0.7.1: credit notes
+
+Sales Invoices marked Is Return are outside VDM selling-price enforcement, including credit notes generated from Delivery Note returns and standalone credit notes. They show Not Applicable with a credit-note explanation and do not require Standard Selling prices or matrix exception approval. ERPNext's own return validation, permissions and accounting checks remain unchanged. The approval button is hidden for credit notes.
+
+Normal invoices, quotations and orders retain discount enforcement. A negative quantity alone does not create an exemption. Returns do not replenish inherited approval quantity allowances. Consolidated normal sales remain unsupported. Deploy, migrate and refresh, then verify the Delivery Note Issue Credit Note flow on the site; local tests do not run a full ERPNext return workflow.

@@ -44,6 +44,10 @@ def inspect(doc):
     if doc.doctype not in DOCTYPES:
         frappe.throw('Unsupported document type.')
     result = {'status': 'Not Applicable', 'lines': [], 'violations': [], 'fingerprint': '', 'snapshot': {}, 'message': '', 'excluded_rows': []}
+    if doc.doctype == 'Sales Invoice' and doc.get('is_return'):
+        result['message'] = ('Credit note: Discount Matrix selling-price limits do not apply. '
+                             'ERPNext return validation still applies.')
+        return result
     groups, _ = policy()
     actual_groups = {r.idx: frappe.db.get_value('Item', r.item_code, 'item_group') for r in doc.items}
     result['excluded_rows'] = [dict(row=r.idx, item_code=r.item_code, item_group=actual_groups[r.idx],
@@ -60,7 +64,7 @@ def inspect(doc):
         result['message'] = f'No items were checked: Customer Group {group or "(blank)"} has no mapping in VDM Settings.'
         return result
     if doc.get('is_return') or doc.get('is_consolidated'):
-        frappe.throw('Discount Matrix requires separate review for returns or consolidated invoices; this version does not support them.')
+        frappe.throw('Discount Matrix does not support this return document type or consolidated invoices.')
     if doc.get('is_cash_or_non_trade_discount') and (doc.get('discount_amount') or doc.get('additional_discount_percentage')):
         frappe.throw('Use a regular additional discount for matrix-controlled sales, not a cash/non-trade discount.')
     for row, _ in applicable:

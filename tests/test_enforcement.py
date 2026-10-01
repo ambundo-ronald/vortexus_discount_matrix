@@ -245,3 +245,34 @@ class EnforcementTests(unittest.TestCase):
             self.frappe.db.get_value.side_effect = lambda dt, name, field: 'Ro Systems' if dt == 'Item' else 'Dealers'
             with self.assertRaises(ValueError):
                 self.v.before_submit(doc)
+
+
+    def test_credit_notes_skip_price_lookup_on_save_and_submit(self):
+        for linked in [None, 'ORIGINAL-INVOICE']:
+            doc = self.scenario('Sales Invoice', rate=0)
+            doc.is_return = 1
+            doc.return_against = linked
+            doc.items[0].qty = -1
+            doc.custom_vdm_status = 'Adjust Price'
+            with patch.object(self.v, 'reference_rate', side_effect=AssertionError('No reference price needed')):
+                self.v.validate(doc)
+                self.v.before_submit(doc)
+                self.v.on_submit(doc)
+                result = self.v.inspect(doc)
+            self.assertEqual(result['status'], 'Not Applicable')
+            self.assertEqual(result['violations'], [])
+            self.assertIn('Credit note', result['message'])
+            self.assertEqual(doc.custom_vdm_status, 'Not Applicable')
+            self.frappe.db.get_value.assert_not_called()
+
+    def test_negative_normal_sale_is_not_exempt(self):
+        doc = self.scenario('Sales Invoice')
+        doc.items[0].qty = -1
+        with self.inspect_patches(), self.assertRaisesRegex(ValueError, 'positive quantities'):
+            self.v.before_submit(doc)
+
+    def test_consolidated_sales_remain_unsupported(self):
+        doc = self.scenario('Sales Invoice')
+        doc.is_consolidated = 1
+        with self.inspect_patches(), self.assertRaisesRegex(ValueError, 'consolidated'):
+            self.v.before_submit(doc)

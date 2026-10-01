@@ -51,7 +51,7 @@
           return runCheck(frm, true);
         });
         frm.remove_custom_button(__('Approve Discount Exception'));
-        if (!frm.is_new() && frm.doc.docstatus === 0 && frappe.user.has_role('Sales Manager')) {
+        if (!frm.is_new() && frm.doc.docstatus === 0 && !(dt === 'Sales Invoice' && frm.doc.is_return) && frappe.user.has_role('Sales Manager')) {
           let options;
           try {
             options = await frappe.call({method: method + 'approval_options'});
