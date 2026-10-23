@@ -282,3 +282,14 @@ How it is calculated:
 Items without a Standard Selling price or cost are kept with a warning instead of blocking the save.
 
 Deploy, migrate and reload Desk. On staging, compare one item's projected figures with its actual invoices for the period, change a proposed price and confirm the projection changes, and check an item with no cost and one with no price.
+
+
+## Version 0.10.1: simulation fixes, preview and customer groups
+
+**Form scripts now load for VDM doctypes.** Frappe does not load `doctype_js` hooks for custom DocTypes, so the Price Simulation buttons (and the VDM Approval terms table from 0.3.1) did not appear. Both scripts are now loaded with Desk through `app_include_js`. After deploying, run the normal migration and asset build, then hard-refresh the browser.
+
+**Selecting an Item Group fills the table.** Choosing a Load Item Group saves the simulation and adds that group's enabled sales items. Existing rows and proposed prices are kept, so you can build a simulation from several groups. With Load Only Items Sold in Period ticked, only items sold in the period are added; a message explains when nothing is found.
+
+**Preview.** The Preview button opens one large table with a row for every item and customer group: item, prices, cost and cost source, then that group's history, assumed discount, expected price and margin, projected revenue and profit, the price and margin at the maximum discount, the margin minimum, and warnings. Type in Filter rows to narrow it, and use Download CSV to open it in a spreadsheet.
+
+**Simulation by customer group.** Each item is simulated for every Customer Group mapped in VDM Settings, plus any unmapped Customer Group with sales in the period. Each group uses its own buying history (quantity and past discount) and its matrix column's limits, so groups that share a column, such as several dealer groups, are shown separately. Below-cost and margin-minimum warnings are listed once per matrix column.

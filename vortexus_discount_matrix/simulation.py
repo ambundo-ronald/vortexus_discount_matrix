@@ -7,7 +7,7 @@ import json
 import frappe
 from frappe.utils import flt, getdate, nowdate
 from vortexus_discount_matrix.prices import standard_selling_price, stock_cost, selling_exchange_rate
-from vortexus_discount_matrix.simulation_math import simulate_item, history_by_column, HISTORICAL
+from vortexus_discount_matrix.simulation_math import simulate_item, history_by_group, HISTORICAL
 
 MAX_ITEMS = 500
 
@@ -32,6 +32,16 @@ def validate(doc, method=None):
         if row.item_code in seen:
             frappe.throw(f'Item {row.item_code} appears more than once.')
         seen.add(row.item_code)
+    if doc.get('item_group') and (doc.is_new() or doc.has_value_changed('item_group')):
+        # Selecting an Item Group fills the table on save; existing rows and prices are kept.
+        loaded = add_items(doc)
+        if not loaded['found']:
+            frappe.msgprint(f"No enabled sales items found in Item Group {doc.item_group}"
+                            + (' with sales in the history period. Untick Load Only Items Sold in Period to include unsold items.'
+                               if loaded['only_sold'] else '.'), title='No items added')
+        elif loaded['not_added']:
+            frappe.msgprint(f"Added {loaded['added']} items; {loaded['not_added']} more were not added "
+                            f"(limit {loaded['limit']} items per simulation).", title='Items added')
     refresh(doc)
 
 
@@ -41,8 +51,8 @@ def refresh(doc):
     discounts, margins = matrix_tables()
     mappings = customer_mappings()
     rows = doc.get('items') or []
-    history = history_by_column(sales_history(doc.company, doc.from_date, doc.to_date,
-                                              [r.item_code for r in rows]), mappings)
+    history = history_by_group(sales_history(doc.company, doc.from_date, doc.to_date,
+                                             [r.item_code for r in rows]))
     company_currency = frappe.get_cached_value('Company', doc.company, 'default_currency')
     day = getdate(nowdate())
     basis = doc.get('projection_basis') or HISTORICAL
@@ -63,7 +73,7 @@ def refresh(doc):
             row.proposed_price = row.current_price
         cost, row.cost_source = stock_cost(row.item_code, doc.get('warehouse'))
         row.cost = cost or 0
-        result = simulate_item(flt(row.proposed_price), cost, history.get(row.item_code, {}),
+        result = simulate_item(flt(row.proposed_price), cost, history.get(row.item_code, {}), mappings,
                                discounts.get(row.item_group, {}), margins.get(row.item_group, {}), basis)
         if row.item_group not in discounts:
             warnings.append('Item Group is not in the discount matrix: no maximum discount applies.')
@@ -110,6 +120,12 @@ def load_items(name):
     """Add matrix items (optionally one Item Group, optionally only items sold in the period)."""
     doc = frappe.get_doc('VDM Price Simulation', name)
     doc.check_permission('write')
+    result = add_items(doc)
+    doc.save()
+    return result
+
+
+def add_items(doc):
     from vortexus_discount_matrix.settings import matrix_tables
     discounts, _ = matrix_tables()
     groups = [doc.item_group] if doc.get('item_group') else list(discounts)
@@ -125,5 +141,5 @@ def load_items(name):
     room = max(MAX_ITEMS - len(existing), 0)
     for item_code in new[:room]:
         doc.append('items', {'item_code': item_code})
-    doc.save()
-    return dict(added=min(len(new), room), not_added=max(len(new) - room, 0), limit=MAX_ITEMS)
+    return dict(added=min(len(new), room), not_added=max(len(new) - room, 0), limit=MAX_ITEMS,
+                found=len(items), only_sold=bool(doc.get('only_sold_items')))

@@ -38,6 +38,9 @@ class SimulationTests(unittest.TestCase):
                      to_date='2026-10-23', projection_basis='Historical discount', warehouse=None,
                      items=[Record(item_code=code, proposed_price=price) for code, price in rows])
         doc.set = lambda key, value: doc.__setitem__(key, value)
+        doc.is_new = lambda: False
+        doc.has_value_changed = lambda key: False
+        doc.append = lambda key, value: doc['items'].append(Record(value))
         return doc
 
     def patches(self, price=100, cost=(40, 'Item Valuation Rate'), history=()):
@@ -69,6 +72,7 @@ class SimulationTests(unittest.TestCase):
         self.assertAlmostEqual(row.lowest_floor_margin, 20)
         self.assertIn('30% Margin Matrix minimum', row.warnings)
         detail = json.loads(row.column_detail)
+        self.assertEqual(detail[0]['customer_group'], 'Dealers')
         self.assertEqual(detail[0]['column'], 'Dealers')
         self.assertAlmostEqual(doc.projected_profit, 400)
         params = self.frappe.db.sql.call_args.args[1]
@@ -119,7 +123,6 @@ class SimulationTests(unittest.TestCase):
         doc = self.doc(('EXISTING', 10))
         doc.item_group, doc.only_sold_items = None, 1
         doc.check_permission = Mock()
-        doc.append = lambda key, value: doc['items'].append(Record(value))
         doc.save = Mock()
         self.frappe.get_doc = Mock(return_value=doc)
         self.frappe.get_all = Mock(return_value=['EXISTING', 'SOLD', 'UNSOLD'])
@@ -129,11 +132,46 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(self.frappe.get_all.call_args.kwargs['filters'],
                          {'item_group': ['in', ['Pumps']], 'disabled': 0, 'is_sales_item': 1})
         self.assertEqual([r.item_code for r in doc['items']], ['EXISTING', 'SOLD'])
-        self.assertEqual(result, dict(added=1, not_added=0, limit=500))
+        self.assertEqual(result, dict(added=1, not_added=0, limit=500, found=2, only_sold=True))
         doc.save.assert_called_once_with()
         with self.patches(history=[dict(item_code='SOLD'), dict(item_code='UNSOLD')]), \
                 patch.object(self.sim, 'MAX_ITEMS', 3):
             doc.only_sold_items = 0
             doc['items'] = [Record(item_code='EXISTING')]
             self.frappe.get_all.return_value = ['A', 'B', 'C', 'D']
-            self.assertEqual(self.sim.load_items('VDM-SIM-1'), dict(added=2, not_added=2, limit=3))
+            self.assertEqual(self.sim.load_items('VDM-SIM-1'), dict(added=2, not_added=2, limit=3, found=4, only_sold=False))
+
+    def test_selecting_item_group_fills_table_on_save(self):
+        doc = self.doc(('KEPT', 75))
+        doc.item_group, doc.only_sold_items = 'CATRIDGES', 0
+        doc.has_value_changed = lambda key: key == 'item_group'
+        self.frappe.get_all = Mock(return_value=['KEPT', 'C1', 'C2'])
+        self.frappe.msgprint = Mock()
+        with self.patches():
+            self.sim.validate(doc)
+        self.assertEqual(self.frappe.get_all.call_args.kwargs['filters']['item_group'], ['in', ['CATRIDGES']])
+        self.assertEqual([r.item_code for r in doc['items']], ['KEPT', 'C1', 'C2'])
+        self.assertEqual(doc['items'][0].proposed_price, 75)  # existing amendments kept
+        self.assertEqual(doc['items'][1].proposed_price, 100)
+        self.frappe.msgprint.assert_not_called()
+
+    def test_unchanged_item_group_does_not_reload(self):
+        doc = self.doc(('KEPT', 75))
+        doc.item_group = 'CATRIDGES'
+        self.frappe.get_all = Mock(return_value=['C1'])
+        with self.patches():
+            self.sim.validate(doc)
+        self.frappe.get_all.assert_not_called()
+        self.assertEqual(len(doc['items']), 1)
+
+    def test_empty_item_group_explains_why(self):
+        doc = self.doc()
+        doc.item_group, doc.only_sold_items = 'CATRIDGES', 1
+        doc.is_new = lambda: True
+        self.frappe.get_all = Mock(return_value=['C1'])
+        self.frappe.msgprint = Mock()
+        with self.patches(history=[]):
+            self.sim.validate(doc)
+        message = self.frappe.msgprint.call_args.args[0]
+        self.assertIn('No enabled sales items found in Item Group CATRIDGES', message)
+        self.assertIn('Untick Load Only Items Sold in Period', message)

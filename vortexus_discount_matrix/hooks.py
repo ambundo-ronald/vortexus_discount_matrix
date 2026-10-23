@@ -21,7 +21,13 @@ doctype_js = {dt: "public/js/transaction.js" for dt in doc_events}
 
 doc_events['VDM Settings'] = {'validate': 'vortexus_discount_matrix.settings.validate'}
 
-doctype_js["VDM Approval"] = "public/js/approval.js"
 
 doc_events['VDM Price Simulation'] = {'validate': 'vortexus_discount_matrix.simulation.validate'}
-doctype_js["VDM Price Simulation"] = "public/js/simulation.js"
+
+# VDM doctypes are custom DocTypes. Frappe ignores doctype_js for custom
+# DocTypes (FormMeta.add_code returns early), so load their form scripts
+# with Desk. Each script only registers handlers for its own DocType.
+app_include_js = [
+    "/assets/vortexus_discount_matrix/js/approval.js",
+    "/assets/vortexus_discount_matrix/js/simulation.js",
+]
