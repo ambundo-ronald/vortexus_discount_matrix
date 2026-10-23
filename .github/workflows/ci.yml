@@ -20,13 +20,18 @@ jobs:
       - name: Python syntax
         run: python -m compileall -q vortexus_discount_matrix
       - name: JavaScript syntax
-        run: node --check vortexus_discount_matrix/public/js/transaction.js
+        run: |
+          node --check vortexus_discount_matrix/public/js/transaction.js
+          node --check vortexus_discount_matrix/public/js/approval.js
+          node --check vortexus_discount_matrix/public/js/simulation.js
       - name: Button feedback tests
         run: node tests/test_buttons.js
       - name: Approval table tests
         run: node tests/test_approval_view.js
       - name: Approval switch tests
         run: node tests/test_approval_switch.js
+      - name: Price simulation form tests
+        run: node tests/test_simulation_view.js
       - name: Combined script loading tests
         run: node tests/test_script_boundaries.js
       - name: Build package

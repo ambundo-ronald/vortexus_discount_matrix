@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 
-for (const script of ['transaction', 'approval']) {
+for (const script of ['transaction', 'approval', 'simulation']) {
   const source = fs.readFileSync(`vortexus_discount_matrix/public/js/${script}.js`, 'utf8');
   const registrations = [];
   const frappe = {
@@ -16,8 +16,8 @@ for (const script of ['transaction', 'approval']) {
     /is not a function/, 'reproduce the reported error before the fix');
   registrations.length = 0;
   vm.runInNewContext(preceding + source, context);
-  const expected = script === 'transaction'
-    ? ['Quotation', 'Sales Order', 'Sales Invoice'] : ['VDM Approval'];
+  const expected = {transaction: ['Quotation', 'Sales Order', 'Sales Invoice'],
+    approval: ['VDM Approval'], simulation: ['VDM Price Simulation']}[script];
   for (const doctype of expected) assert.ok(registrations.includes(doctype), doctype);
 }
 console.log('Combined form scripts load after a controller without a trailing semicolon.');

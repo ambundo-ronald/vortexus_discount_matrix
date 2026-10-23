@@ -8,8 +8,9 @@
     const color = colors[result.status] || 'orange';
     let content = `<b>${escape(result.status)}</b><br>${escape(result.message)}`;
     if (result.lines?.length) {
-      content += '<br><br>' + result.lines.map(r =>
-        `Row ${escape(r.row)} (${escape(r.item_code)}): maximum discount ${escape(r.max_discount)}%; minimum net unit price ${escape(r.minimum_net_rate)}; entered net unit price ${escape(r.actual_net_rate)}.`
+      content += '<br><br>' + result.lines.map(r => r.min_margin != null
+        ? `Row ${escape(r.row)} (${escape(r.item_code)}): minimum margin ${escape(r.min_margin)}%; minimum net unit price ${escape(r.minimum_net_rate)}; entered net unit price ${escape(r.actual_net_rate)} (margin ${r.actual_margin == null ? 'n/a' : escape(Number(r.actual_margin).toFixed(2)) + '%'}).`
+        : `Row ${escape(r.row)} (${escape(r.item_code)}): maximum discount ${escape(r.max_discount)}%; minimum net unit price ${escape(r.minimum_net_rate)}; entered net unit price ${escape(r.actual_net_rate)}.`
       ).join('<br>');
     }
     if (result.excluded_rows?.length) {
@@ -72,7 +73,7 @@
           }
         }
         if (isViolation(frm.doc.custom_vdm_status)) {
-          frm.dashboard.set_headline_alert(__('Discount exceeds the permitted limit. Increase the selling price or reduce the discount.'), 'red');
+          frm.dashboard.set_headline_alert(__('Price is below the permitted matrix minimum. Increase the selling price or reduce the discount.'), 'red');
         } else if (frm.doc.custom_vdm_status === 'Disabled') {
           frm.dashboard.set_headline_alert(__('Discount Matrix enforcement is disabled in VDM Settings.'), 'orange');
         }

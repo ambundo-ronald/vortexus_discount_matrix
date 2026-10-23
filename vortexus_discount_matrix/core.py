@@ -27,6 +27,22 @@ def effective_discount(reference, actual):
     return (1 - decimal(actual) / decimal(reference)) * 100
 
 
+def margin_minimum_price(cost, margin, precision=2):
+    """Lowest net price whose gross margin on price, (price - cost) / price, reaches margin%."""
+    cost, margin = decimal(cost), decimal(margin)
+    if cost <= 0 or not 0 <= margin < 100:
+        raise ValueError("Invalid cost or margin limit")
+    return (cost / (1 - margin / 100)).quantize(Decimal(1).scaleb(-precision), rounding=ROUND_CEILING)
+
+
+def gross_margin(cost, actual):
+    """Gross margin on price as a percentage; None when the price is not positive."""
+    actual = decimal(actual)
+    if actual <= 0:
+        return None
+    return (actual - decimal(cost)) / actual * 100
+
+
 def fingerprint(payload):
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode()).hexdigest()
 
@@ -42,15 +58,56 @@ def policy():
     return groups, customers
 
 
-def limit(item_group, customer_group, customer_mappings=None):
-    groups, defaults = policy()
-    customers = defaults if customer_mappings is None else customer_mappings
+MATRIX_COLUMNS = ('Dealers', 'Traders', 'Technicians', 'NGOs / Parastatals', 'Corporates', 'End Users / Retail')
+# Matrix column -> fieldname on the editable VDM Discount Limit rows.
+LIMIT_FIELDS = dict(zip(MATRIX_COLUMNS, ('dealers', 'traders', 'technicians', 'ngos_parastatals', 'corporates', 'end_users_retail')))
+DISCOUNT_MODE, MARGIN_MODE = 'Discount Matrix', 'Margin Matrix'
+MATRIX_MODES = (DISCOUNT_MODE, MARGIN_MODE)
+
+
+def default_limit_rows():
+    """Accepted CSV policy as VDM Discount Limit rows; used only to seed settings."""
+    return [dict(item_group=group, solution_line=row['Solution Line'], category=row['Category'],
+                 **{field: float(row[column + ' Max Discount %']) for column, field in LIMIT_FIELDS.items()})
+            for group, row in policy()[0].items()]
+
+
+def limits_from_rows(rows, mode=DISCOUNT_MODE):
+    margin = mode == MARGIN_MODE
+    table, label, bounds = (('margin matrix', 'minimum margin', 'at least 0 and below 100') if margin
+                            else ('discount matrix', 'maximum discount', 'between 0 and 100'))
+    result = {}
+    for row in rows:
+        group = (row.get('item_group') or '').strip()
+        if not group:
+            raise ValueError(f'Every {table} row requires an Item Group.')
+        if group in result:
+            raise ValueError(f'Item Group {group} appears more than once in the {table}.')
+        limits = {}
+        for column, field in LIMIT_FIELDS.items():
+            value = row.get(field)
+            try:
+                value = decimal(value)
+            except (ValueError, TypeError, ArithmeticError):
+                raise ValueError(f'Item Group {group}: enter a {column} {label}; it must be {bounds}.') from None
+            if value < 0 or value > 100 or (margin and value == 100):
+                raise ValueError(f'Item Group {group}: {column} {label} must be {bounds}.')
+            limits[column] = value
+        result[group] = limits
+    return result
+
+
+@lru_cache(maxsize=1)
+def default_limits():
+    return limits_from_rows(default_limit_rows())
+
+
+def limit(item_group, customer_group, customer_mappings=None, item_limits=None):
+    customers = policy()[1] if customer_mappings is None else customer_mappings
+    groups = default_limits() if item_limits is None else item_limits
     if item_group not in groups or customer_group not in customers:
         return None
-    return decimal(groups[item_group][customers[customer_group] + ' Max Discount %'])
-
-
-MATRIX_COLUMNS = ('Dealers', 'Traders', 'Technicians', 'NGOs / Parastatals', 'Corporates', 'End Users / Retail')
+    return groups[item_group][customers[customer_group]]
 
 
 def mapping_from_rows(rows):
@@ -66,7 +123,7 @@ def mapping_from_rows(rows):
     return result
 
 
-NUMERIC_TERMS = set('row qty conversion_factor rate net_rate net_amount discount_percentage discount_amount additional_discount_percentage conversion_rate reference_price reference_net_rate max_discount minimum_net_rate actual_net_rate effective_discount tax_amount included_in_print_rate row_id'.split())
+NUMERIC_TERMS = set('row qty conversion_factor rate net_rate net_amount discount_percentage discount_amount additional_discount_percentage conversion_rate reference_price reference_net_rate max_discount minimum_net_rate actual_net_rate effective_discount tax_amount included_in_print_rate row_id cost_rate min_margin actual_margin'.split())
 
 
 def canonical_terms(value, key=None):

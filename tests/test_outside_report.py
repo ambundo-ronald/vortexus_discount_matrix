@@ -16,7 +16,10 @@ class OutsideReportTests(unittest.TestCase):
             dict(name='B', item_name='Excluded', item_group='POOL PUMP', stock_uom='Nos', is_sales_item=1, disabled=0),
             dict(name='C', item_name='New', item_group='New Group', stock_uom='Nos', is_sales_item=0, disabled=1),
         ])
-        self.patch = patch.dict(sys.modules, {'frappe': self.frappe})
+        from vortexus_discount_matrix.core import limits_from_rows, default_limit_rows
+        settings = types.ModuleType('vortexus_discount_matrix.settings')
+        settings.active_limits = lambda: ('Discount Matrix', limits_from_rows(default_limit_rows()))
+        self.patch = patch.dict(sys.modules, {'frappe': self.frappe, settings.__name__: settings})
         self.patch.start()
         sys.modules.pop(MODULE, None)
         self.report = importlib.import_module(MODULE)

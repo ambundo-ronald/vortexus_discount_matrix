@@ -2,8 +2,9 @@ import json
 import frappe
 from frappe.utils import flt
 from erpnext.controllers.taxes_and_totals import calculate_taxes_and_totals
-from vortexus_discount_matrix.core import limit, minimum_price, effective_discount, fingerprint, policy, terms_fingerprint, changed_term_paths
-from vortexus_discount_matrix.prices import reference_rate
+from vortexus_discount_matrix.core import (limit, minimum_price, effective_discount, margin_minimum_price,
+    gross_margin, terms_fingerprint, changed_term_paths, MARGIN_MODE)
+from vortexus_discount_matrix.prices import reference_rate, cost_rate
 
 DOCTYPES = ('Quotation', 'Sales Order', 'Sales Invoice')
 
@@ -48,17 +49,19 @@ def inspect(doc):
         result['message'] = ('Credit note: Discount Matrix selling-price limits do not apply. '
                              'ERPNext return validation still applies.')
         return result
-    groups, _ = policy()
+    from vortexus_discount_matrix.settings import customer_mappings, active_limits
+    mode, groups = active_limits()
+    margin = mode == MARGIN_MODE
+    table = 'margin matrix' if margin else 'discount matrix'
     actual_groups = {r.idx: frappe.db.get_value('Item', r.item_code, 'item_group') for r in doc.items}
     result['excluded_rows'] = [dict(row=r.idx, item_code=r.item_code, item_group=actual_groups[r.idx],
-        reason='Item Group has no accepted matrix mapping.') for r in doc.items if actual_groups[r.idx] not in groups]
+        reason=f'Item Group is not in the VDM Settings {table}.') for r in doc.items if actual_groups[r.idx] not in groups]
     if not any(g in groups for g in actual_groups.values()):
-        result['message'] = 'No items were checked: their Item Groups are outside the accepted matrix mappings.'
+        result['message'] = f'No items were checked: their Item Groups are not in the VDM Settings {table}.'
         return result
     group = customer_group(doc)
-    from vortexus_discount_matrix.settings import customer_mappings
     mappings = customer_mappings()
-    applicable = [(r, limit(actual_groups[r.idx], group, mappings)) for r in doc.items]
+    applicable = [(r, limit(actual_groups[r.idx], group, mappings, groups)) for r in doc.items]
     applicable = [(r, cap) for r, cap in applicable if cap is not None]
     if not applicable:
         result['message'] = f'No items were checked: Customer Group {group or "(blank)"} has no mapping in VDM Settings.'
@@ -72,6 +75,60 @@ def inspect(doc):
             frappe.throw(f'Row {row.idx}: matrix-controlled items require positive quantities and cannot be alternative quotation rows.')
     # Recompute derived amounts so caller-supplied net rates cannot bypass controls.
     calculate_taxes_and_totals(doc)
+    if margin:
+        check_margins(doc, applicable, actual_groups, result)
+    else:
+        check_discounts(doc, applicable, actual_groups, result)
+    def pick(obj, names):
+        return {n: obj.get(n) for n in names.split()}
+    snapshot = dict(document=doc.name, doctype=doc.doctype, customer_group=group, matrix_column=mappings.get(group), lines=result['lines'],
+        header=pick(doc, 'customer quotation_to party_name company currency transaction_date posting_date conversion_rate selling_price_list discount_amount additional_discount_percentage apply_discount_on'),
+        items=[pick(r, 'item_code qty uom conversion_factor rate net_rate net_amount discount_percentage discount_amount warehouse item_tax_template item_tax_rate quotation quotation_item prevdoc_docname sales_order so_detail') for r in doc.items],
+        taxes=[pick(r, 'charge_type account_head rate tax_amount included_in_print_rate row_id add_deduct_tax category') for r in doc.get('taxes', [])])
+    if margin:
+        # Discount snapshots keep their original shape so existing approvals stay valid.
+        snapshot['matrix_mode'] = mode
+    result['snapshot'] = snapshot
+    result['fingerprint'] = terms_fingerprint(snapshot)
+    result['status'] = 'Adjust Price' if result['violations'] else 'Within Limit'
+    result['message'] = (('Margin is below the permitted minimum. Increase the selling price or reduce the discount.' if margin
+        else 'Discount exceeds the permitted limit. Increase the selling price or reduce the discount.')
+        if result['violations'] else f"All {len(result['lines'])} checked item lines are within their limits.")
+    exceptions_enabled = approvals_allowed()
+    if result['violations'] and not exceptions_enabled:
+        result['message'] += ' Manager exceptions are disabled in VDM Settings.'
+    if exceptions_enabled and result['violations'] and not doc.is_new():
+        if matching_approval(doc, result):
+            result['status'] = 'Approved Exception'
+            result['message'] = 'A Sales Manager explicitly approved an exception for these exact terms.'
+    if exceptions_enabled and result['violations'] and result['status'] != 'Approved Exception':
+        from vortexus_discount_matrix.carry_forward import inherited_rows
+        inherited = inherited_rows(doc, result['violations'], inspect, frappe)
+        result['inherited_approvals'] = inherited
+        result['violations'] = [v for v in result['violations'] if v['row'] not in inherited]
+        if not result['violations']:
+            result['status'] = 'Inherited Exception'
+            references = sorted({v['source_doctype'] + ' ' + v['source_name'] for v in inherited.values()})
+            result['message'] = 'Approved discount carried forward from ' + ', '.join(references) + '. No additional approval is required.'
+    return result
+
+
+def check_margins(doc, applicable, actual_groups, result):
+    # ERPNext net_rate excludes tax and includes additional discounts; cost is per row UOM.
+    for row, minimum_margin in applicable:
+        cost, cost_source = cost_rate(doc, row)
+        precision = row.precision('net_rate') or 2
+        floor = margin_minimum_price(cost, minimum_margin, precision)
+        actual = gross_margin(cost, row.net_rate)
+        line = dict(row=row.idx, item_code=row.item_code, item_group=actual_groups[row.idx],
+            cost_rate=cost, cost_source=cost_source, min_margin=float(minimum_margin), minimum_net_rate=float(floor),
+            actual_net_rate=row.net_rate, actual_margin=None if actual is None else float(actual))
+        result['lines'].append(line)
+        if flt(row.net_rate, precision) < float(floor):
+            result['violations'].append(line)
+
+
+def check_discounts(doc, applicable, actual_groups, result):
     shadow = frappe.get_doc(doc.as_dict())
     shadow.discount_amount = 0
     shadow.additional_discount_percentage = 0
@@ -97,34 +154,6 @@ def inspect(doc):
         result['lines'].append(line)
         if flt(row.net_rate, precision) < float(floor):
             result['violations'].append(line)
-    def pick(obj, names):
-        return {n: obj.get(n) for n in names.split()}
-    snapshot = dict(document=doc.name, doctype=doc.doctype, customer_group=group, matrix_column=mappings.get(group), lines=result['lines'],
-        header=pick(doc, 'customer quotation_to party_name company currency transaction_date posting_date conversion_rate selling_price_list discount_amount additional_discount_percentage apply_discount_on'),
-        items=[pick(r, 'item_code qty uom conversion_factor rate net_rate net_amount discount_percentage discount_amount warehouse item_tax_template item_tax_rate quotation quotation_item prevdoc_docname sales_order so_detail') for r in doc.items],
-        taxes=[pick(r, 'charge_type account_head rate tax_amount included_in_print_rate row_id add_deduct_tax category') for r in doc.get('taxes', [])])
-    result['snapshot'] = snapshot
-    result['fingerprint'] = terms_fingerprint(snapshot)
-    result['status'] = 'Adjust Price' if result['violations'] else 'Within Limit'
-    result['message'] = ('Discount exceeds the permitted limit. Increase the selling price or reduce the discount.'
-        if result['violations'] else f"All {len(result['lines'])} checked item lines are within their limits.")
-    exceptions_enabled = approvals_allowed()
-    if result['violations'] and not exceptions_enabled:
-        result['message'] += ' Manager exceptions are disabled in VDM Settings.'
-    if exceptions_enabled and result['violations'] and not doc.is_new():
-        if matching_approval(doc, result):
-            result['status'] = 'Approved Exception'
-            result['message'] = 'A Sales Manager explicitly approved an exception for these exact terms.'
-    if exceptions_enabled and result['violations'] and result['status'] != 'Approved Exception':
-        from vortexus_discount_matrix.carry_forward import inherited_rows
-        inherited = inherited_rows(doc, result['violations'], inspect, frappe)
-        result['inherited_approvals'] = inherited
-        result['violations'] = [v for v in result['violations'] if v['row'] not in inherited]
-        if not result['violations']:
-            result['status'] = 'Inherited Exception'
-            references = sorted({v['source_doctype'] + ' ' + v['source_name'] for v in inherited.values()})
-            result['message'] = 'Approved discount carried forward from ' + ', '.join(references) + '. No additional approval is required.'
-    return result
 
 
 def matching_approval(doc, result):
@@ -150,8 +179,16 @@ def matching_approval(doc, result):
     return False
 
 
+def describe(r):
+    if r.get('min_margin') is not None:
+        actual = 'n/a' if r.get('actual_margin') is None else f"{r['actual_margin']:.2f}%"
+        return (f"Row {r['row']} ({r['item_code']}): minimum margin {r['min_margin']:g}%; minimum net unit price "
+                f"{r['minimum_net_rate']:g}; entered net unit price {r['actual_net_rate']:g} (margin {actual}).")
+    return f"Row {r['row']} ({r['item_code']}): maximum discount {r['max_discount']:g}%; minimum net unit price {r['minimum_net_rate']:g}; entered net unit price {r['actual_net_rate']:g}."
+
+
 def summary(result):
-    details = '\n'.join(f"Row {r['row']} ({r['item_code']}): maximum discount {r['max_discount']:g}%; minimum net unit price {r['minimum_net_rate']:g}; entered net unit price {r['actual_net_rate']:g}." for r in result['violations'])
+    details = '\n'.join(describe(r) for r in result['violations'])
     return details + ('\n' + result['approval_mismatch'] if result.get('approval_mismatch') else '')
 
 
@@ -168,7 +205,7 @@ def validate(doc, method=None):
 def before_submit(doc, method=None):
     validate(doc)
     if doc.custom_vdm_status in ('Adjust Price', 'Pending Approval'):
-        frappe.throw('Discount exceeds the permitted matrix limit. Increase the selling price or reduce the discount before submitting.\n' + doc.custom_vdm_summary)
+        frappe.throw('Price is below the permitted matrix minimum. Increase the selling price or reduce the discount before submitting.\n' + doc.custom_vdm_summary)
 
 
 def on_submit(doc, method=None):

@@ -1,5 +1,5 @@
 import frappe
-from vortexus_discount_matrix.core import policy
+from vortexus_discount_matrix.settings import active_limits
 
 
 def execute(filters=None):
@@ -16,8 +16,9 @@ def execute(filters=None):
     items = frappe.get_list('Item', filters=query,
         fields=['name', 'item_name', 'item_group', 'stock_uom', 'is_sales_item', 'disabled'],
         order_by='item_group asc, name asc', limit_page_length=0)
-    groups, _ = policy()
-    data = [{**item, 'reason': 'Item Group has no accepted matrix mapping'}
+    mode, groups = active_limits()
+    table = mode.lower()
+    data = [{**item, 'reason': f'Item Group is not in the VDM Settings {table}'}
         for item in items if item.get('item_group') not in groups]
     columns = [
         dict(fieldname='name', label='Item Code', fieldtype='Link', options='Item', width=200),
@@ -30,5 +31,5 @@ def execute(filters=None):
     ]
     summary = [dict(label='Items Outside Matrix', value=len(data), datatype='Int', indicator='Orange'),
         dict(label='Unmapped Item Groups', value=len({r['item_group'] for r in data}), datatype='Int', indicator='Orange')]
-    message = 'Shows items visible to you whose exact Item Group has no accepted mapping. Includes intentionally excluded groups. Customer mappings and transaction discount violations are not evaluated here.'
+    message = f'Shows items visible to you whose exact Item Group has no row in the active VDM Settings {table}. Includes intentionally excluded groups. Customer mappings and transaction discount violations are not evaluated here.'
     return columns, data, message, None, summary

@@ -87,9 +87,10 @@ class NavigationTests(unittest.TestCase):
         self.setup.install_sidebar()
         targets = [(r.link_type, r.link_to) for r in sidebar.items]
         self.assertEqual(len(targets), len(set(targets)))
-        self.assertEqual(len(targets), 12)
+        self.assertEqual(len(targets), 13)
         self.assertIn(('DocType', 'Customer'), targets)
         self.assertIn(('Report', 'Items Outside Discount Matrix'), targets)
+        self.assertIn(('DocType', 'VDM Price Simulation'), targets)
         self.assertIn(('DocType', 'VDM Approval'), targets)
         self.assertNotIn(('DocType', 'VDM Customer Mapping'), targets)
 
@@ -104,7 +105,7 @@ class NavigationTests(unittest.TestCase):
         self.assertEqual(definition['title'], 'Vortexus Discount Matrix')
         self.assertEqual(definition['module'], 'Vortexus Discount Matrix')
         self.assertEqual(definition['app'], 'vortexus_discount_matrix')
-        self.assertEqual(len(sidebar.items), 11)
+        self.assertEqual(len(sidebar.items), 12)
         sidebar.save.assert_called_once_with(ignore_permissions=True)
 
 

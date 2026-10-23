@@ -45,6 +45,9 @@ class EnforcementTests(unittest.TestCase):
     def inspect_patches(self):
         settings = types.ModuleType('vortexus_discount_matrix.settings')
         settings.customer_mappings = lambda: {'Technician': 'Technicians'}
+        from vortexus_discount_matrix.core import limits_from_rows, default_limit_rows
+        settings.active_limits = lambda: getattr(self, 'active', None) or (
+            'Discount Matrix', getattr(self, 'item_limits', None) or limits_from_rows(default_limit_rows()))
         def calculate(doc):
             for row in doc.items:
                 row.net_rate = row.rate - (doc.get('discount_amount') or 0) / row.qty
@@ -276,3 +279,87 @@ class EnforcementTests(unittest.TestCase):
         doc.is_consolidated = 1
         with self.inspect_patches(), self.assertRaisesRegex(ValueError, 'consolidated'):
             self.v.before_submit(doc)
+
+    def test_edited_settings_percentage_changes_the_floor(self):
+        from decimal import Decimal
+        from vortexus_discount_matrix.core import limits_from_rows, default_limit_rows
+        rows = default_limit_rows()
+        for row in rows:
+            if row['item_group'] == 'Ro Systems':
+                row['technicians'] = 70
+        self.item_limits = limits_from_rows(rows)
+        doc = self.scenario(rate=150)
+        with self.inspect_patches():
+            result = self.v.inspect(doc)
+        self.assertEqual(result['status'], 'Within Limit')
+        self.assertEqual(result['lines'][0]['max_discount'], 70)
+        self.assertEqual(result['lines'][0]['minimum_net_rate'], 150)
+
+    def test_group_removed_from_settings_is_outside_control(self):
+        from vortexus_discount_matrix.core import limits_from_rows, default_limit_rows
+        self.item_limits = limits_from_rows([r for r in default_limit_rows() if r['item_group'] != 'Ro Systems'])
+        doc = self.scenario(rate=1)
+        with self.inspect_patches():
+            result = self.v.inspect(doc)
+        self.assertEqual(result['status'], 'Not Applicable')
+        self.assertEqual(result['excluded_rows'][0]['item_group'], 'Ro Systems')
+
+    def margin_patches(self, minimum_margin=55, cost=100):
+        from vortexus_discount_matrix.core import LIMIT_FIELDS, limits_from_rows
+        row = dict(item_group='Ro Systems', **{f: minimum_margin for f in LIMIT_FIELDS.values()})
+        self.active = ('Margin Matrix', limits_from_rows([row], 'Margin Matrix'))
+        stack = self.inspect_patches()
+        stack.enter_context(patch.object(self.v, 'cost_rate', return_value=(cost, 'Warehouse Valuation Rate')))
+        stack.enter_context(patch.object(self.v, 'reference_rate', side_effect=AssertionError('Margin mode needs no selling price')))
+        return stack
+
+    def test_margin_mode_blocks_below_minimum_gross_margin(self):
+        for doctype in self.v.DOCTYPES:
+            doc = self.scenario(doctype, rate=200)
+            with self.margin_patches():
+                result = self.v.inspect(doc)
+                self.assertEqual(result['status'], 'Adjust Price')
+                line = result['lines'][0]
+                self.assertEqual(line['min_margin'], 55)
+                self.assertEqual(line['minimum_net_rate'], 222.23)  # 100 / 0.45 rounded up
+                self.assertEqual(line['actual_margin'], 50)
+                self.assertEqual(line['cost_source'], 'Warehouse Valuation Rate')
+                self.assertIn('Margin is below', result['message'])
+                self.assertEqual(result['snapshot']['matrix_mode'], 'Margin Matrix')
+                self.v.validate(doc)
+                self.assertIn('minimum margin 55%', doc.custom_vdm_summary)
+                with self.assertRaisesRegex(ValueError, 'Increase the selling price'):
+                    self.v.before_submit(doc)
+
+    def test_margin_mode_allows_price_at_or_above_floor(self):
+        for rate in (222.23, 300):
+            doc = self.scenario(rate=rate)
+            with self.margin_patches():
+                self.v.before_submit(doc)
+                self.assertEqual(doc.custom_vdm_status, 'Within Limit')
+
+    def test_margin_mode_counts_additional_discount(self):
+        doc = self.scenario(rate=250)
+        doc.discount_amount = 40  # net 210 < 222.23
+        with self.margin_patches():
+            self.assertEqual(self.v.inspect(doc)['status'], 'Adjust Price')
+
+    def test_margin_mode_free_row_is_a_violation(self):
+        doc = self.scenario(rate=0)
+        with self.margin_patches():
+            result = self.v.inspect(doc)
+        self.assertEqual(result['status'], 'Adjust Price')
+        self.assertIsNone(result['lines'][0]['actual_margin'])
+
+    def test_margin_mode_uses_margin_table_scope(self):
+        doc = self.scenario(rate=1)
+        with self.margin_patches():
+            self.active = ('Margin Matrix', {})
+            result = self.v.inspect(doc)
+        self.assertEqual(result['status'], 'Not Applicable')
+        self.assertIn('margin matrix', result['message'])
+
+    def test_discount_snapshot_shape_is_unchanged(self):
+        doc = self.scenario()
+        with self.inspect_patches():
+            self.assertNotIn('matrix_mode', self.v.inspect(doc)['snapshot'])

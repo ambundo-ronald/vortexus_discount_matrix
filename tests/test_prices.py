@@ -115,3 +115,46 @@ class PriceTests(unittest.TestCase):
         with patch.dict(sys.modules, {module.__name__: module}):
             self.prices.reference_rate(doc, row)
         module.get_exchange_rate.assert_called_once_with('KES', 'USD', '2026-09-25', args='for_selling')
+
+    def cost_inputs(self, bin_rate=None, item_rate=None, purchase_rate=None, currency='KES', company_currency='KES'):
+        self.prices = importlib.import_module('vortexus_discount_matrix.prices')
+        doc = Mock(currency=currency)
+        doc.get.side_effect = lambda key: {'transaction_date': '2026-09-21', 'company': 'CO'}.get(key)
+        row = types.SimpleNamespace(item_code='PUMP', uom='Nos', conversion_factor=1, idx=1, get=lambda k: 'Stores' if k == 'warehouse' else None)
+        def get_value(dt, name, field):
+            if field == 'stock_uom':
+                return 'Nos'
+            if dt == 'Bin':
+                return bin_rate
+            if dt == 'Item' and field == 'valuation_rate':
+                return item_rate
+            if dt == 'Item' and field == 'last_purchase_rate':
+                return purchase_rate
+            return 10
+        self.frappe.db.get_value.side_effect = get_value
+        self.frappe.get_cached_value = Mock(return_value=company_currency)
+        return doc, row
+
+    def test_cost_prefers_warehouse_valuation(self):
+        doc, row = self.cost_inputs(bin_rate=80, item_rate=70, purchase_rate=60)
+        self.assertEqual(self.prices.cost_rate(doc, row), (80, 'Warehouse Valuation Rate'))
+
+    def test_cost_falls_back_to_item_valuation(self):
+        doc, row = self.cost_inputs(bin_rate=0, item_rate=70, purchase_rate=60)
+        self.assertEqual(self.prices.cost_rate(doc, row), (70, 'Item Valuation Rate'))
+
+    def test_cost_falls_back_to_last_purchase_rate(self):
+        doc, row = self.cost_inputs(bin_rate=0, item_rate=0, purchase_rate=60)
+        self.assertEqual(self.prices.cost_rate(doc, row), (60, 'Last Purchase Rate'))
+        row.get = lambda k: None  # no warehouse on the row
+        self.assertEqual(self.prices.cost_rate(doc, row), (60, 'Last Purchase Rate'))
+
+    def test_missing_valuation_blocks_margin_check(self):
+        doc, row = self.cost_inputs()
+        with self.assertRaisesRegex(ValueError, 'no valuation rate or last purchase rate'):
+            self.prices.cost_rate(doc, row)
+
+    def test_cost_uses_row_uom_conversion(self):
+        doc, row = self.cost_inputs(purchase_rate=80)
+        row.uom, row.conversion_factor = 'Box', 10
+        self.assertEqual(self.prices.cost_rate(doc, row), (800, 'Last Purchase Rate'))

@@ -1,10 +1,10 @@
 # Vortexus Discount Matrix â€” ERPNext v16
 
-An installable Frappe app implementing the accepted Discount Matrix policy. It covers Quotation, Sales Order and Sales Invoice. No gross-profit or margin rules are included.
+An installable Frappe app implementing the accepted Discount Matrix policy. It covers Quotation, Sales Order and Sales Invoice. Since version 0.9, VDM Settings can enforce either the discount matrix or a minimum-margin matrix (see Version 0.9).
 
 ## Policy
 
-- 94 exact Item Group mappings are bundled in `vortexus_discount_matrix/data`. The 11 accepted Customer Group mappings seed an editable table in VDM Settings on first installation or upgrade.
+- 94 accepted Item Group limits and 11 accepted Customer Group mappings are bundled in `vortexus_discount_matrix/data`. They seed editable tables in VDM Settings once, on first installation or upgrade. After that, VDM Settings is the policy.
 - The other groups, including Intercompany and All Customer Groups, are outside this new control. Existing ERPNext controls still apply.
 - No item-level overrides or automatic parent-group inheritance.
 - Standard Selling is an independent baseline. Direct price increases and discounts below the ceiling are allowed. This app does not automatically apply the maximum discount.
@@ -61,7 +61,7 @@ Use **VDM Approval** to review the recorded reason, approver, time and approved 
 - A mapped Item Group on a lead quotation requires selection of a Customer; otherwise its discount ceiling cannot be determined.
 - Missing/ambiguous baseline prices stop saving until corrected. Excessive discounts with a valid baseline can be saved pending approval.
 - Inherited Item Group rules are intentionally absent. Every in-scope match is exact.
-- Item Group mappings remain version-controlled CSV files in the app. Customer Group mappings are editable only through VDM Settings by System Managers. Updating review files does not change the installed policy. Item Group changes must be bundled and redeployed; customer mappings use saved site settings. Do not rerun `build_mapping.py` against edited review files because it regenerates the original proposal.
+- Since version 0.8, Item Group limits and Customer Group mappings are both edited in VDM Settings by System Managers. The bundled CSV files only seed new installations; editing them does not change an installed site. Do not rerun `build_mapping.py` against edited review files because it regenerates the original proposal.
 - This release has not been run against a real Frappe/ERPNext site in this workspace. Local tests cover pure calculations and mocked approval guards, not full tax, permissions, workflow, migration or browser integration.
 
 ## Required staging acceptance
@@ -218,3 +218,67 @@ Deploy, migrate and refresh. Test a Lead quotation at the limit and below it, a 
 Sales Invoices marked Is Return are outside VDM selling-price enforcement, including credit notes generated from Delivery Note returns and standalone credit notes. They show Not Applicable with a credit-note explanation and do not require Standard Selling prices or matrix exception approval. ERPNext's own return validation, permissions and accounting checks remain unchanged. The approval button is hidden for credit notes.
 
 Normal invoices, quotations and orders retain discount enforcement. A negative quantity alone does not create an exemption. Returns do not replenish inherited approval quantity allowances. Consolidated normal sales remain unsupported. Deploy, migrate and refresh, then verify the Delivery Note Issue Credit Note flow on the site; local tests do not run a full ERPNext return workflow.
+
+
+## Version 0.8: editable discount matrix
+
+VDM Settings now contains the whole discount matrix in one editable table: **Discount Matrix (maximum discount % from Standard Selling)**. Each row is one exact Item Group, with a maximum discount percentage for each matrix column (Dealers, Traders, Technicians, NGOs / Parastatals, Corporates, End Users / Retail). Solution Line and Category are kept as reference fields in each row's detail.
+
+System Managers can change percentages, add a row for a new Item Group, or delete a row. A deleted row puts that Item Group outside this control; it does not mean zero discount. Enter 0 to allow no discount. Each value must be between 0 and 100, and an Item Group may appear only once. Use the grid's Download and Upload buttons to edit the table in a spreadsheet. Settings changes are version-tracked.
+
+Upgrade: deploy and migrate. The first migration copies the 94 bundled limits into the table once; Item Groups missing on the site are skipped and listed in the migration log. Later migrations preserve edits and deleted rows, including an empty table. Existing percentages do not change until someone edits them.
+
+Changes apply to the next check, save or submission. Approval snapshots record each line's maximum discount, so changing a percentage that affects an approved draft requires a new approval if the document still exceeds the new limit. Carry-forward re-checks the source document under current limits. Submitted documents are not changed. The Items Outside Discount Matrix report uses the same table.
+
+Staging: change one Item Group's Dealers percentage and confirm the check shows the new floor; enter 101 or a duplicate Item Group and confirm saving fails; delete a row and confirm its items show as outside the control; run a second migration and confirm the edits remain.
+
+
+## Version 0.9: margin matrix and matrix selection
+
+VDM Settings has a new **Matrix In Use** setting with two choices:
+
+- **Discount Matrix** (default; existing behaviour): each percentage is the maximum discount from the Standard Selling price.
+- **Margin Matrix**: each percentage is the minimum gross margin the system accepts, calculated as (net selling price - cost) / net selling price.
+
+Only the selected table is enforced. Upgrading keeps Discount Matrix selected, so nothing changes until a System Manager switches it.
+
+The **Margin Matrix** table has the same layout as the discount table: one row per exact Item Group and one percentage for each matrix column (Dealers, Traders, Technicians, NGOs / Parastatals, Corporates, End Users / Retail). On upgrade it is created once with the discount table's Item Groups and every percentage at 0, so only the percentages need entering. Download/Upload is available for spreadsheet editing. Each value must be at least 0 and below 100. With Margin Matrix in use, Item Groups not listed are outside this control, and 0 blocks only sales below cost.
+
+Cost is taken from the first positive value of: the item's valuation rate in the row's warehouse (Bin), the Item master valuation rate, then the Item's last purchase rate. All three are per stock UOM in company currency. The source used is recorded on each checked line and shown on approvals. Cost is converted to the row UOM using the Item master UOM conversion and from company currency to the document currency using the same server-resolved selling exchange rate as the discount check. The selling price is ERPNext's net unit rate, which excludes tax and includes item and additional document discounts. Minimum price = cost / (1 - margin / 100), rounded up. Example: cost 100 and a 55% Dealer margin gives a minimum net price of 222.23; selling at 200 is a 50% margin and needs price correction or a manager exception.
+
+An item with no positive valuation rate or last purchase rate cannot be checked and stops saving with an explanation; receive or purchase stock, or set the Item valuation rate. The last purchase rate is the most recent purchase price and can differ from the stock valuation. A free (zero-price) controlled row is below any margin. Standard Selling prices are not needed in margin mode.
+
+Salespeople see the minimum net price in the check dialog. Together with the margin percentage, this lets them work out the item cost. Consider this before enabling Margin Matrix.
+
+Manager exceptions, carry-forward and the submission checks work the same way in both modes. A margin approval records the cost, the minimum margin and the matrix in use. A change of cost (valuation rate), margin percentage or matrix requires a new approval for a document that is still below the limit. Valuation rates move with stock receipts, so approve margin exceptions close to submission. Carry-forward re-checks the source document under the current matrix and cost. Discount-matrix approvals made before this version remain valid.
+
+The Items Outside Discount Matrix report lists items whose Item Group is missing from the matrix currently in use.
+
+Staging: select Margin Matrix; set one Item Group's Dealers margin to 55%; with a valuation rate of 100, confirm 222.23 passes and 222.22 shows Adjust Price for Quotation, Sales Order and Sales Invoice; confirm an item with only a last purchase rate uses it, and an item with neither is reported; test a foreign-currency document and a non-stock UOM; approve an exception, then change the valuation rate and confirm a new approval is required; switch back to Discount Matrix and confirm the original limits apply.
+
+
+## Version 0.10: price simulation
+
+Search Desk for **VDM Price Simulation** (also in the app sidebar as Price Simulations). Sales Managers and System Managers can create, edit and delete simulations. Each simulation is a saved scenario, so you can keep several and compare them.
+
+A simulation only reads system data. It does not change Item Prices, the matrix tables or any sales document. To use a price you settle on, update the Standard Selling Item Price as usual.
+
+1. Create a simulation: enter a title, the Company and the sales history period (default: the last 12 months). Optionally choose one Item Group and a Cost Warehouse. Save.
+2. Click **Load Items**. It adds enabled sales items in the discount-matrix Item Groups (or only the chosen group). By default it adds only items sold in the period. A simulation holds up to 500 items; use one Item Group per simulation for larger ranges. Items can also be added manually.
+3. **Proposed Price** starts at the current Standard Selling price. Change any proposed prices, then save or click **Recalculate**. Saving reloads current prices, costs and sales history; proposed prices are kept.
+
+For each item the simulation shows the current price, proposed price, change, cost and cost source, quantity sold, projected revenue, projected profit, projected margin and the lowest margin the discount matrix allows. Totals are at the top of Results. **Detail by Customer Column** breaks each item down by matrix column (Dealers, Traders, Technicians, NGOs / Parastatals, Corporates, End Users / Retail, plus unmapped customer groups): quantity bought, average price paid, past discount, maximum discount, assumed discount, expected price and margin, projected revenue and profit, the price at the maximum discount, its margin, and the Margin Matrix minimum. Rows where the maximum discount goes below cost or below the Margin Matrix minimum are highlighted and listed as warnings.
+
+How it is calculated:
+
+- **Sales history**: submitted, non-return Sales Invoices for the Company in the period, grouped by item and the invoice's Customer Group, mapped to matrix columns through VDM Settings. Quantities are in stock UOM; amounts are net of discounts, exclude tax, and are in company currency.
+- **Past discount** for a column = 1 - net sales / (invoice list price x quantity), using lines sold from a list price. It measures how far below the list price each customer type usually buys.
+- **Projection basis**: *Historical discount* assumes each column keeps its past discount on the proposed price, capped at the matrix maximum (larger discounts would be blocked); columns with no list-price history use the matrix maximum. *Maximum matrix discount* assumes every sale is at the highest discount allowed (worst case).
+- **Volume**: projected quantities equal the quantities sold in the history period. The simulation does not predict how demand changes with price; judge that yourself, or shorten or lengthen the period.
+- **Cost**: the same order as the Margin Matrix: Cost Warehouse valuation rate, Item valuation rate, then last purchase rate. Historical profit is recalculated at today's cost, not the cost at the time of sale.
+- **Margin** = (price - cost) / price. The discount matrix and Margin Matrix are both read from VDM Settings, whichever is in use for enforcement.
+- Proposed and current prices are per stock UOM in company currency (Standard Selling is converted if its currency differs). If your Standard Selling prices include tax, projected revenue and margins are overstated by the tax.
+
+Items without a Standard Selling price or cost are kept with a warning instead of blocking the save.
+
+Deploy, migrate and reload Desk. On staging, compare one item's projected figures with its actual invoices for the period, change a proposed price and confirm the projection changes, and check an item with no cost and one with no price.

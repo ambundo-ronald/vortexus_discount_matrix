@@ -28,4 +28,11 @@ assert.ok(render('{bad').includes('could not be read'));
 assert.ok(render('{}').includes('No matrix item lines'));
 data.lines[0].actual_net_rate = 400;
 assert.ok(render(JSON.stringify(data)).includes('Within limit'));
+const marginHtml = render(JSON.stringify({document: 'SO-1', matrix_mode: 'Margin Matrix', header: {currency: 'KES'},
+  items: [{item_code: 'PUMP', qty: 2, uom: 'Nos'}],
+  lines: [{row: 1, item_code: 'PUMP', item_group: 'Pumps', cost_rate: 100, cost_source: 'Last Purchase Rate', min_margin: 55, minimum_net_rate: 222.23, actual_net_rate: 200, actual_margin: 50}]}));
+assert.ok(marginHtml.includes('Unit Cost') && marginHtml.includes('Actual Margin') && marginHtml.includes('Margin Matrix'));
+assert.ok(marginHtml.includes('55%') && marginHtml.includes('50%') && marginHtml.includes('Exception approved'));
+assert.ok(!marginHtml.includes('Standard Price'));
+assert.ok(marginHtml.includes('Last Purchase Rate'));
 console.log('Approval table checks passed: old snapshots, quantities, exceptions, malformed data and HTML escaping.');
