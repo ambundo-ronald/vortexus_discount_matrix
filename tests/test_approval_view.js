@@ -35,4 +35,11 @@ assert.ok(marginHtml.includes('Unit Cost') && marginHtml.includes('Actual Margin
 assert.ok(marginHtml.includes('55%') && marginHtml.includes('50%') && marginHtml.includes('Exception approved'));
 assert.ok(!marginHtml.includes('Standard Price'));
 assert.ok(marginHtml.includes('Last Purchase Rate'));
+const bothHtml = render(JSON.stringify({document: 'Q-1', matrix_mode: 'Discount and Margin', header: {currency: 'KES'},
+  items: [{item_code: 'RO', qty: 1, uom: 'Nos'}],
+  lines: [{row: 1, item_code: 'RO', item_group: 'Ro Systems', reference_price: 500, max_discount: 36, minimum_net_rate: 320,
+    cost_rate: 100, cost_source: 'System cost (FIFO)', min_margin: 30, margin_floor: 142.86, actual_net_rate: 300,
+    effective_discount: 40, actual_margin: 66.67, level: 'Sales Manager'}]}));
+assert.ok(bothHtml.includes('Discount and Margin') && bothHtml.includes('Margin Floor') && bothHtml.includes('Discount Floor'));
+assert.ok(bothHtml.includes('System cost (FIFO)') && bothHtml.includes('Exception approved'));
 console.log('Approval table checks passed: old snapshots, quantities, exceptions, malformed data and HTML escaping.');

@@ -151,3 +151,52 @@ class SimulationBasisUpgradeTests(unittest.TestCase):
                 self.assertFalse(setup.update_simulation_basis())  # idempotent
             finally:
                 sys.modules.pop('vortexus_discount_matrix.setup', None)
+
+
+class ApproverUpgradeTests(unittest.TestCase):
+    def load(self, exists):
+        from unittest.mock import Mock
+        frappe = types.ModuleType('frappe')
+        frappe.db = Mock(); frappe.db.exists = Mock(side_effect=exists)
+        frappe.clear_cache = Mock()
+        custom = types.ModuleType('frappe.custom.doctype.custom_field.custom_field'); custom.create_custom_fields = Mock()
+        self.patcher = patch.dict(sys.modules, {'frappe': frappe, custom.__name__: custom})
+        self.patcher.start()
+        sys.modules.pop('vortexus_discount_matrix.setup', None)
+        self.addCleanup(lambda: (sys.modules.pop('vortexus_discount_matrix.setup', None), self.patcher.stop()))
+        return frappe, importlib.import_module('vortexus_discount_matrix.setup')
+
+    def test_md_role_created_once(self):
+        from unittest.mock import Mock
+        frappe, setup = self.load(lambda dt, name: False)
+        role = Mock(); frappe.get_doc = Mock(return_value=role)
+        setup.install_approver_role()
+        self.assertEqual(frappe.get_doc.call_args.args[0], dict(doctype='Role', role_name='MD', desk_access=1))
+        role.insert.assert_called_once()
+        frappe.db.exists = Mock(return_value=True); frappe.get_doc.reset_mock()
+        setup.install_approver_role()
+        frappe.get_doc.assert_not_called()
+
+    def test_existing_doctypes_get_level_field_md_permissions_and_both_mode(self):
+        from unittest.mock import Mock
+        frappe, setup = self.load(lambda dt, name: True)
+        ns = types.SimpleNamespace
+        def doctype(fields, perms):
+            d = ns(fields=fields, permissions=perms, save=Mock())
+            d.append = lambda key, value: getattr(d, key).append(ns(**value))
+            return d
+        approval = doctype([ns(fieldname='snapshot')], [ns(role='Sales Manager')])
+        simulation = doctype([], [ns(role='Sales Manager')])
+        mode = ns(fieldname='matrix_mode', options='Discount Matrix\nMargin Matrix', description='old')
+        settings = doctype([mode], [])
+        frappe.get_doc = Mock(side_effect=lambda dt, name: {'VDM Approval': approval, 'VDM Price Simulation': simulation, 'VDM Settings': settings}[name])
+        setup.upgrade_doctypes()
+        self.assertIn('approval_level', [f.fieldname for f in approval.fields])
+        self.assertIn('MD', [p.role for p in approval.permissions])
+        self.assertIn('MD', [p.role for p in simulation.permissions])
+        self.assertIn('Discount and Margin', mode.options.split('\n'))
+        for d in (approval, simulation, settings):
+            d.save.assert_called_once()
+        setup.upgrade_doctypes()  # idempotent
+        for d in (approval, simulation, settings):
+            d.save.assert_called_once()

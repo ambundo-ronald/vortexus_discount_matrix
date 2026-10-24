@@ -116,43 +116,75 @@ class PriceTests(unittest.TestCase):
             self.prices.reference_rate(doc, row)
         module.get_exchange_rate.assert_called_once_with('KES', 'USD', '2026-09-25', args='for_selling')
 
-    def cost_inputs(self, bin_rate=None, item_rate=None, purchase_rate=None, currency='KES', company_currency='KES'):
+    def cost_inputs(self, bin_qty=0, fifo_rate=0, company=(0, 0), item_rate=70, purchase_rate=0,
+                    currency='KES', company_currency='KES', qty=1):
+        import sys
         self.prices = importlib.import_module('vortexus_discount_matrix.prices')
         doc = Mock(currency=currency)
         doc.get.side_effect = lambda key: {'transaction_date': '2026-09-21', 'company': 'CO'}.get(key)
-        row = types.SimpleNamespace(item_code='PUMP', uom='Nos', conversion_factor=1, idx=1, get=lambda k: 'Stores' if k == 'warehouse' else None)
+        row = types.SimpleNamespace(item_code='PUMP', uom='Nos', conversion_factor=1, idx=1, qty=qty,
+                                    get=lambda k: {'warehouse': 'Stores', 'qty': qty}.get(k))
         def get_value(dt, name, field):
             if field == 'stock_uom':
                 return 'Nos'
-            if dt == 'Bin':
-                return bin_rate
+            if dt == 'Bin' and field == 'actual_qty':
+                return bin_qty
             if dt == 'Item' and field == 'valuation_rate':
-                return item_rate
+                return item_rate  # stale master value: must never be used
             if dt == 'Item' and field == 'last_purchase_rate':
                 return purchase_rate
             return 10
         self.frappe.db.get_value.side_effect = get_value
+        self.frappe.db.sql = Mock(return_value=[{'value': company[0], 'qty': company[1]}])
         self.frappe.get_cached_value = Mock(return_value=company_currency)
+        self.frappe.utils.nowtime = lambda: '12:00:00'
+        self.frappe.log_error = Mock()
+        stock = types.ModuleType('erpnext.stock.utils')
+        stock.get_incoming_rate = Mock(return_value=fifo_rate)
+        self.incoming = stock.get_incoming_rate
+        patcher = patch.dict(sys.modules, {stock.__name__: stock})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         return doc, row
 
-    def test_cost_prefers_warehouse_valuation(self):
-        doc, row = self.cost_inputs(bin_rate=80, item_rate=70, purchase_rate=60)
-        self.assertEqual(self.prices.cost_rate(doc, row), (80, 'Warehouse Valuation Rate'))
+    def test_cost_is_erpnext_fifo_cost_from_the_row_warehouse(self):
+        doc, row = self.cost_inputs(bin_qty=10, fifo_rate=80, item_rate=70, purchase_rate=60, qty=3)
+        self.assertEqual(self.prices.cost_rate(doc, row), (80, 'System cost (FIFO)'))
+        args = self.incoming.call_args.args[0]
+        self.assertEqual((args['item_code'], args['warehouse'], args['qty'], args['company']), ('PUMP', 'Stores', -3, 'CO'))
+        self.assertEqual(self.incoming.call_args.kwargs, dict(raise_error_if_no_rate=False, fallbacks=False))
 
-    def test_cost_falls_back_to_item_valuation(self):
-        doc, row = self.cost_inputs(bin_rate=0, item_rate=70, purchase_rate=60)
-        self.assertEqual(self.prices.cost_rate(doc, row), (70, 'Item Valuation Rate'))
+    def test_empty_warehouse_uses_company_stock_valuation(self):
+        doc, row = self.cost_inputs(bin_qty=0, company=(1000, 10), purchase_rate=60)
+        self.assertEqual(self.prices.cost_rate(doc, row), (100, 'Company stock valuation'))
+        self.incoming.assert_not_called()  # no stock here: ERPNext's master-rate fallbacks are never reached
+
+    def test_item_master_valuation_rate_is_never_used(self):
+        doc, row = self.cost_inputs(item_rate=70, purchase_rate=0)
+        self.assertEqual(self.prices.cost_rate(doc, row), (None, None))
 
     def test_cost_falls_back_to_last_purchase_rate(self):
-        doc, row = self.cost_inputs(bin_rate=0, item_rate=0, purchase_rate=60)
+        doc, row = self.cost_inputs(purchase_rate=60)
         self.assertEqual(self.prices.cost_rate(doc, row), (60, 'Last Purchase Rate'))
         row.get = lambda k: None  # no warehouse on the row
         self.assertEqual(self.prices.cost_rate(doc, row), (60, 'Last Purchase Rate'))
 
-    def test_missing_valuation_blocks_margin_check(self):
-        doc, row = self.cost_inputs()
-        with self.assertRaisesRegex(ValueError, 'no valuation rate or last purchase rate'):
-            self.prices.cost_rate(doc, row)
+    def test_higher_of_basis_uses_last_purchase_when_higher(self):
+        from vortexus_discount_matrix.core import HIGHER_COST
+        doc, row = self.cost_inputs(bin_qty=5, fifo_rate=80, purchase_rate=95)
+        self.assertEqual(self.prices.cost_rate(doc, row, HIGHER_COST), (95, 'Last Purchase Rate (higher than system cost)'))
+        self.assertEqual(self.prices.cost_rate(doc, row), (80, 'System cost (FIFO)'))
+
+    def test_older_erpnext_without_fallbacks_argument(self):
+        doc, row = self.cost_inputs(bin_qty=5)
+        self.incoming.side_effect = lambda args, raise_error_if_no_rate=True, **kw: (_ for _ in ()).throw(TypeError('fallbacks')) if kw else 77
+        self.assertEqual(self.prices.cost_rate(doc, row), (77, 'System cost (FIFO)'))
+
+    def test_costing_helper_failure_falls_back_instead_of_blocking(self):
+        doc, row = self.cost_inputs(bin_qty=5, purchase_rate=60)
+        self.incoming.side_effect = RuntimeError('boom')
+        self.assertEqual(self.prices.cost_rate(doc, row), (60, 'Last Purchase Rate'))
+        self.frappe.log_error.assert_called_once()
 
     def test_cost_uses_row_uom_conversion(self):
         doc, row = self.cost_inputs(purchase_rate=80)

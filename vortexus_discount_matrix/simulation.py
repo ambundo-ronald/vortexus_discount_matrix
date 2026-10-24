@@ -56,6 +56,8 @@ def refresh(doc):
     company_currency = frappe.get_cached_value('Company', doc.company, 'default_currency')
     day = getdate(nowdate())
     basis = doc.get('projection_basis') or HISTORICAL
+    from vortexus_discount_matrix.settings import control_options
+    cost_basis = control_options()['cost_basis']
     totals = dict(history_revenue=0.0, history_profit=0.0, projected_revenue=0.0, projected_profit=0.0)
     for row in rows:
         item = frappe.db.get_value('Item', row.item_code, ['item_name', 'item_group', 'stock_uom'], as_dict=True) or {}
@@ -71,7 +73,7 @@ def refresh(doc):
             warnings.append(str(exc))
         if not flt(row.proposed_price) and flt(row.current_price):
             row.proposed_price = row.current_price
-        cost, row.cost_source = stock_cost(row.item_code, doc.get('warehouse'))
+        cost, row.cost_source = stock_cost(row.item_code, doc.get('warehouse'), 1, day, doc.company, cost_basis)
         row.cost = cost or 0
         result = simulate_item(flt(row.proposed_price), cost, history.get(row.item_code, {}), mappings,
                                discounts.get(row.item_group, {}), margins.get(row.item_group, {}), basis,

@@ -48,6 +48,14 @@ class EnforcementTests(unittest.TestCase):
         from vortexus_discount_matrix.core import limits_from_rows, default_limit_rows
         settings.active_limits = lambda: getattr(self, 'active', None) or (
             'Discount Matrix', getattr(self, 'item_limits', None) or limits_from_rows(default_limit_rows()))
+        def enforced():
+            if getattr(self, 'enforced', None):
+                return self.enforced
+            mode, limits = settings.active_limits()
+            return (mode, limits, None) if mode == 'Discount Matrix' else (mode, None, limits)
+        settings.enforced_limits = enforced
+        settings.control_options = lambda: dict(dict(block_below_cost=False, cost_basis='System cost (FIFO)',
+            cost_tolerance=5.0, approver_role='MD'), **getattr(self, 'controls', {}))
         def calculate(doc):
             for row in doc.items:
                 row.net_rate = row.rate - (doc.get('discount_amount') or 0) / row.qty

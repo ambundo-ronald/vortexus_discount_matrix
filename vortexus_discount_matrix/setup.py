@@ -1,5 +1,6 @@
 import frappe
-from vortexus_discount_matrix.core import MATRIX_COLUMNS, MATRIX_MODES, DISCOUNT_MODE, LIMIT_FIELDS, default_limit_rows, policy
+from vortexus_discount_matrix.core import (MATRIX_COLUMNS, MATRIX_MODES, DISCOUNT_MODE, LIMIT_FIELDS, default_limit_rows, policy,
+    COST_BASES, SYSTEM_COST, DEFAULT_APPROVER_ROLE)
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
@@ -9,6 +10,7 @@ def field(name, label, kind='Data', **kwargs):
 
 def install():
     """Idempotent: never enable enforcement as a side effect of install/migrate."""
+    install_approver_role()
     if not frappe.db.exists('Module Def', 'Vortexus Discount Matrix'):
         frappe.get_doc(dict(doctype='Module Def', module_name='Vortexus Discount Matrix', app_name='vortexus_discount_matrix')).insert(ignore_permissions=True)
     definitions = {
@@ -34,15 +36,19 @@ def install():
             field('approved_by', 'Approved By', 'Link', options='User', reqd=1),
             field('approved_at', 'Approved At', 'Datetime', reqd=1),
             field('snapshot', 'Approved Terms', 'Long Text', reqd=1),
-        ], permissions=[dict(role='Sales Manager', read=1), dict(role='System Manager', read=1)]),
+            field('approval_level', 'Approval Level', 'Select', options='Sales Manager\nMargin Approver', read_only=1),
+        ], permissions=[dict(role='Sales Manager', read=1), dict(role='System Manager', read=1),
+                        dict(role=DEFAULT_APPROVER_ROLE, read=1)]),
     }
     for name, definition in definitions.items():
         if not frappe.db.exists('DocType', name):
             frappe.get_doc(dict(doctype='DocType', name=name, module='Vortexus Discount Matrix', custom=1, **definition)).insert(ignore_permissions=True)
+    upgrade_doctypes()
     # Add fields to both new installs and sites upgrading from version 0.1.0.
     settings_type = frappe.get_doc('DocType', 'VDM Settings')
     approvals_added = not any(f.fieldname == 'allow_manager_approvals' for f in settings_type.fields)
     mode_added = not any(f.fieldname == 'matrix_mode' for f in settings_type.fields)
+    controls_added = not any(f.fieldname == 'block_below_cost' for f in settings_type.fields)
     for definition in [
         field('allow_manager_approvals', 'Allow Sales Manager Discount Exceptions', 'Check', default='1',
             description='When unchecked, direct and inherited exceptions cannot authorize submission. Existing approval records are retained.'),
@@ -55,14 +61,25 @@ def install():
                         '0 means no discount is allowed. Changes apply to the next check; submitted documents are not changed.'),
         field('limits_initialized', 'Limits Initialized', 'Check', hidden=1, read_only=1, default='0'),
         field('matrix_mode', 'Matrix In Use', 'Select', options='\n'.join(MATRIX_MODES), default=DISCOUNT_MODE, reqd=1,
-            description='Discount Matrix: maximum discount from Standard Selling. '
-                        'Margin Matrix: minimum gross margin, (net price - valuation rate) / net price. '
-                        'Only the selected table is enforced.'),
-        field('margin_limits', 'Margin Matrix (minimum gross margin % on valuation rate)', 'Table',
+            description=MODE_DESCRIPTION),
+        field('margin_limits', 'Margin Matrix (minimum gross margin % on cost)', 'Table',
             options='VDM Margin Limit', allow_bulk_edit=1,
             description='One row per exact Item Group. Item Groups not listed are outside this control when Margin Matrix is in use. '
                         'Each value must be at least 0 and below 100. Items need a valuation rate to be checked.'),
         field('margins_initialized', 'Margins Initialized', 'Check', hidden=1, read_only=1, default='0'),
+        field('block_below_cost', 'Block Sales Below Cost', 'Check', default='1',
+            description='A controlled line priced below its cost cannot be submitted and cannot be approved by anyone. '
+                        'Applies in every matrix mode; lines without a known cost are not blocked by this rule.'),
+        field('cost_basis', 'Cost Basis', 'Select', options='\n'.join(COST_BASES), default=SYSTEM_COST,
+            description='System cost: the cost ERPNext would book if the goods left the row warehouse now (FIFO stock queue), '
+                        'then the company-wide stock valuation, then the last purchase rate. The Item master valuation rate is not used. '
+                        'Higher of: uses the last purchase rate when it is above the system cost.'),
+        field('cost_tolerance', 'Cost Tolerance for Approvals (%)', 'Percent', default='5',
+            description='An approved exception stays valid while each line cost rises by no more than this percentage. '
+                        'Costs move with every stock receipt; a larger rise needs a new approval.'),
+        field('margin_approver_role', 'Margin Approver Role', 'Link', options='Role', default=DEFAULT_APPROVER_ROLE,
+            description='Approves prices below the margin minimum and lines without a known cost. '
+                        'Sales Managers approve discount-matrix exceptions only.'),
     ]:
         if not any(f.fieldname == definition['fieldname'] for f in settings_type.fields):
             settings_type.append('fields', definition)
@@ -71,11 +88,17 @@ def install():
     settings_type.save(ignore_permissions=True)
     frappe.clear_cache(doctype='VDM Settings')
     settings = frappe.get_doc('VDM Settings')
-    if approvals_added or mode_added or not settings.get('matrix_mode'):
+    if approvals_added or mode_added or controls_added or not settings.get('matrix_mode'):
         if approvals_added:
             settings.allow_manager_approvals = 1
         if not settings.get('matrix_mode'):
             settings.matrix_mode = DISCOUNT_MODE
+        if controls_added:
+            # Policy: sales below cost are blocked outright. Set once on upgrade; later edits are kept.
+            settings.block_below_cost = 1
+            settings.cost_basis = SYSTEM_COST
+            settings.cost_tolerance = 5
+            settings.margin_approver_role = DEFAULT_APPROVER_ROLE
         settings.save(ignore_permissions=True)
     if not settings.get('mappings_initialized'):
         # Seed once. An intentionally emptied table must remain empty on migration.
@@ -108,6 +131,47 @@ def install():
     install_transaction_fields()
     install_lead_fields()
     install_sidebar()
+
+
+def install_approver_role():
+    """The margin approver (MD) role. Assign it to the Managing Director and any finance approvers."""
+    if not frappe.db.exists('Role', DEFAULT_APPROVER_ROLE):
+        frappe.get_doc(dict(doctype='Role', role_name=DEFAULT_APPROVER_ROLE, desk_access=1)).insert(ignore_permissions=True)
+
+
+def upgrade_doctypes():
+    """Changes to DocTypes created by earlier versions: idempotent."""
+    approval = frappe.get_doc('DocType', 'VDM Approval')
+    changed = False
+    if not any(f.fieldname == 'approval_level' for f in approval.fields):
+        approval.append('fields', field('approval_level', 'Approval Level', 'Select',
+                                        options='Sales Manager\nMargin Approver', read_only=1))
+        changed = True
+    if not any(p.role == DEFAULT_APPROVER_ROLE for p in approval.permissions):
+        approval.append('permissions', dict(role=DEFAULT_APPROVER_ROLE, read=1))
+        changed = True
+    if changed:
+        approval.save(ignore_permissions=True)
+        frappe.clear_cache(doctype='VDM Approval')
+    simulation = frappe.get_doc('DocType', 'VDM Price Simulation')
+    if not any(p.role == DEFAULT_APPROVER_ROLE for p in simulation.permissions):
+        simulation.append('permissions', dict(role=DEFAULT_APPROVER_ROLE, read=1, write=1, create=1, delete=1))
+        simulation.save(ignore_permissions=True)
+        frappe.clear_cache(doctype='VDM Price Simulation')
+    settings_type = frappe.get_doc('DocType', 'VDM Settings')
+    for df in settings_type.fields:
+        if df.fieldname == 'matrix_mode' and df.options != '\n'.join(MATRIX_MODES):
+            df.options = '\n'.join(MATRIX_MODES)
+            df.description = MODE_DESCRIPTION
+            settings_type.save(ignore_permissions=True)
+            frappe.clear_cache(doctype='VDM Settings')
+            break
+
+
+MODE_DESCRIPTION = ('Discount Matrix: maximum discount from Standard Selling. '
+                    'Margin Matrix: minimum gross margin, (net price - cost) / net price. '
+                    'Discount and Margin: both; a Sales Manager approves discount exceptions, '
+                    'the Margin Approver Role approves prices below the margin minimum.')
 
 
 def limit_fields():
@@ -182,7 +246,7 @@ def simulation_fields():
               description='Load Items adds this group only. Blank loads every discount-matrix group.'),
         field('only_sold_items', 'Load Only Items Sold in Period', 'Check', default='1'),
         field('warehouse', 'Cost Warehouse', 'Link', options='Warehouse',
-              description='Valuation rate from this warehouse first; otherwise Item valuation rate, then last purchase rate.'),
+              description='Cost as ERPNext would book it from this warehouse (FIFO), then company stock valuation, then last purchase rate.'),
         field('section_items', 'Items', 'Section Break',
               description='Change Proposed Price and save to recalculate. Saving also refreshes prices, costs and sales history.'),
         field('items', 'Items', 'Table', options='VDM Simulation Item', allow_bulk_edit=1),
@@ -230,7 +294,8 @@ def install_approval_view():
 
 def order_settings_fields(settings_type):
     # Put controls before the long mapping grid on upgraded sites as well.
-    order = ['enabled', 'allow_manager_approvals', 'matrix_mode', 'price_list',
+    order = ['enabled', 'allow_manager_approvals', 'matrix_mode', 'block_below_cost', 'cost_basis', 'cost_tolerance',
+             'margin_approver_role', 'price_list',
              'customer_mappings', 'mappings_initialized', 'discount_limits', 'limits_initialized',
              'margin_limits', 'margins_initialized']
     fields = list(settings_type.fields)

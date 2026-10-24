@@ -53,30 +53,86 @@ def standard_selling_price(item_code, uom, stock_uom, day, label, fail=None):
     return price, bool(exact), price_list.currency
 
 
-def stock_cost(item_code, warehouse=None):
+FIFO_SOURCE, COMPANY_SOURCE, PURCHASE_SOURCE = 'System cost (FIFO)', 'Company stock valuation', 'Last Purchase Rate'
+
+
+def fifo_cost(item_code, warehouse, stock_qty, day, company):
+    """Cost per stock UOM ERPNext would book for this quantity leaving this warehouse now.
+
+    Uses ERPNext's own incoming-rate calculation (FIFO/LIFO stock queue or moving
+    average, per the Item/Company valuation method). Only called when the warehouse
+    holds stock, so ERPNext's Item-master fallbacks are not reached."""
+    qty = flt(frappe.db.get_value('Bin', {'item_code': item_code, 'warehouse': warehouse}, 'actual_qty'))
+    if not math.isfinite(qty) or qty <= 0:
+        return 0.0
+    try:
+        from erpnext.stock.utils import get_incoming_rate
+        from frappe.utils import nowtime
+        args = dict(item_code=item_code, warehouse=warehouse, posting_date=day, posting_time=nowtime(),
+                    qty=-abs(flt(stock_qty) or 1), company=company, voucher_type='Delivery Note',
+                    allow_zero_valuation=1)
+        try:
+            rate = get_incoming_rate(args, raise_error_if_no_rate=False, fallbacks=False)
+        except TypeError:  # ERPNext releases without the fallbacks argument
+            rate = get_incoming_rate(args, raise_error_if_no_rate=False)
+        rate = flt(rate)
+    except ImportError:
+        rate = 0.0
+    except Exception:  # never block a sale because the costing helper failed; fall back instead
+        frappe.log_error(title='VDM: FIFO cost lookup failed', message=frappe.get_traceback()
+                         if hasattr(frappe, 'get_traceback') else '')
+        rate = 0.0
+    return rate if math.isfinite(rate) and rate > 0 else 0.0
+
+
+def company_valuation(item_code, company):
+    """Weighted stock value per unit across the company's warehouses holding stock."""
+    if not company:
+        return 0.0
+    rows = frappe.db.sql("""
+        SELECT SUM(b.stock_value) AS value, SUM(b.actual_qty) AS qty
+        FROM `tabBin` b JOIN `tabWarehouse` w ON w.name = b.warehouse
+        WHERE b.item_code = %s AND w.company = %s AND b.actual_qty > 0""", (item_code, company), as_dict=True)
+    row = rows[0] if rows else {}
+    qty, value = flt(row.get('qty')), flt(row.get('value'))
+    rate = value / qty if qty > 0 else 0.0
+    return rate if math.isfinite(rate) and rate > 0 else 0.0
+
+
+def stock_cost(item_code, warehouse=None, stock_qty=1, day=None, company=None, basis=None):
     """(cost per stock UOM in company currency, source), or (None, None) when no cost is known.
 
-    Order: warehouse valuation rate, Item valuation rate, Item last purchase rate."""
-    lookups = [('Item Valuation Rate', lambda: frappe.db.get_value('Item', item_code, 'valuation_rate')),
-               ('Last Purchase Rate', lambda: frappe.db.get_value('Item', item_code, 'last_purchase_rate'))]
+    Order: ERPNext FIFO cost in the warehouse, company-wide stock valuation, last purchase
+    rate. The Item master valuation rate is not used: stock transactions do not update it.
+    With "Higher of system cost and last purchase rate" the last purchase rate wins when higher."""
+    from vortexus_discount_matrix.core import HIGHER_COST
+    if not day:
+        from frappe.utils import nowdate
+        day = getdate(nowdate())
+    purchase = flt(frappe.db.get_value('Item', item_code, 'last_purchase_rate'))
+    purchase = purchase if math.isfinite(purchase) and purchase > 0 else 0.0
+    cost, source = 0.0, None
     if warehouse:
-        lookups.insert(0, ('Warehouse Valuation Rate', lambda: frappe.db.get_value(
-            'Bin', {'item_code': item_code, 'warehouse': warehouse}, 'valuation_rate')))
-    for source, lookup in lookups:
-        cost = flt(lookup())
-        if math.isfinite(cost) and cost > 0:
-            return cost, source
-    return None, None
+        cost, source = fifo_cost(item_code, warehouse, stock_qty, day, company), FIFO_SOURCE
+    if not cost:
+        cost, source = company_valuation(item_code, company), COMPANY_SOURCE
+    if not cost:
+        cost, source = purchase, PURCHASE_SOURCE
+    if not cost:
+        return None, None
+    if basis == HIGHER_COST and purchase > cost:
+        return purchase, PURCHASE_SOURCE + ' (higher than system cost)'
+    return cost, source
 
 
-def cost_rate(doc, row):
-    """(cost per transaction UOM in the document currency, cost source) for margin checks."""
+def cost_rate(doc, row, basis=None):
+    """(cost per transaction UOM in the document currency, cost source), or (None, None) if unknown."""
     day = getdate(doc.get('transaction_date') or doc.get('posting_date'))
     _, conversion = uom_conversion(row)
-    cost, source = stock_cost(row.item_code, row.get('warehouse'))
+    stock_qty = flt(row.get('stock_qty')) or flt(row.get('qty')) * flt(conversion)
+    cost, source = stock_cost(row.item_code, row.get('warehouse'), stock_qty, day, doc.get('company'), basis)
     if cost is None:
-        frappe.throw(f'Row {row.idx}: {row.item_code} has no valuation rate or last purchase rate, so its margin '
-                     'cannot be checked. Receive or purchase stock, or set the Item valuation rate.')
+        return None, None
     company_currency = frappe.get_cached_value('Company', doc.get('company'), 'default_currency')
     fx = selling_exchange_rate(company_currency, doc.currency, day)
     return cost * flt(conversion) * fx, source

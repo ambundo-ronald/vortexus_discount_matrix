@@ -1,14 +1,14 @@
 ;(() => {
   const method = 'vortexus_discount_matrix.validation.';
   const escape = value => frappe.utils.escape_html(String(value ?? ''));
-  const isViolation = status => ['Adjust Price', 'Pending Approval'].includes(status);
+  const isViolation = status => ['Adjust Price', 'Pending Approval', 'Below Cost'].includes(status);
 
   function render(frm, result, showDialog) {
-    const colors = {'Adjust Price': 'red', 'Pending Approval': 'red', 'Disabled': 'orange', 'Not Applicable': 'orange', 'Approved Exception': 'blue', 'Inherited Exception': 'blue', 'Within Limit': 'green'};
+    const colors = {'Below Cost': 'red', 'Adjust Price': 'red', 'Pending Approval': 'red', 'Disabled': 'orange', 'Not Applicable': 'orange', 'Approved Exception': 'blue', 'Inherited Exception': 'blue', 'Within Limit': 'green'};
     const color = colors[result.status] || 'orange';
     let content = `<b>${escape(result.status)}</b><br>${escape(result.message)}`;
     if (result.lines?.length) {
-      content += '<br><br>' + result.lines.map(r => r.min_margin != null
+      content += '<br><br>' + result.lines.map(r => r.description ? escape(r.description) : r.min_margin != null
         ? `Row ${escape(r.row)} (${escape(r.item_code)}): minimum margin ${escape(r.min_margin)}%; minimum net unit price ${escape(r.minimum_net_rate)}; entered net unit price ${escape(r.actual_net_rate)} (margin ${r.actual_margin == null ? 'n/a' : escape(Number(r.actual_margin).toFixed(2)) + '%'}).`
         : `Row ${escape(r.row)} (${escape(r.item_code)}): maximum discount ${escape(r.max_discount)}%; minimum net unit price ${escape(r.minimum_net_rate)}; entered net unit price ${escape(r.actual_net_rate)}.`
       ).join('<br>');
@@ -52,7 +52,8 @@
           return runCheck(frm, true);
         });
         frm.remove_custom_button(__('Approve Discount Exception'));
-        if (!frm.is_new() && frm.doc.docstatus === 0 && !(dt === 'Sales Invoice' && frm.doc.is_return) && frappe.user.has_role('Sales Manager')) {
+        // The server decides who may approve: Sales Manager, or the margin approver role (MD) set in VDM Settings.
+        if (!frm.is_new() && frm.doc.docstatus === 0 && !(dt === 'Sales Invoice' && frm.doc.is_return)) {
           let options;
           try {
             options = await frappe.call({method: method + 'approval_options'});
@@ -72,7 +73,9 @@
           });
           }
         }
-        if (isViolation(frm.doc.custom_vdm_status)) {
+        if (frm.doc.custom_vdm_status === 'Below Cost') {
+          frm.dashboard.set_headline_alert(__('A price is below cost. Selling below cost is blocked and cannot be approved. Increase the selling price.'), 'red');
+        } else if (isViolation(frm.doc.custom_vdm_status)) {
           frm.dashboard.set_headline_alert(__('Price is below the permitted matrix minimum. Increase the selling price or reduce the discount.'), 'red');
         } else if (frm.doc.custom_vdm_status === 'Disabled') {
           frm.dashboard.set_headline_alert(__('Discount Matrix enforcement is disabled in VDM Settings.'), 'orange');

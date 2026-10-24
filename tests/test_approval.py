@@ -40,6 +40,11 @@ class ApprovalTests(unittest.TestCase):
         for name in ['vortexus_discount_matrix.validation', 'vortexus_discount_matrix.prices']:
             sys.modules.pop(name, None)
         self.modules.stop()
+        # validation imports the real settings module lazily; do not let it leak into other tests.
+        sys.modules.pop('vortexus_discount_matrix.settings', None)
+        import vortexus_discount_matrix
+        if hasattr(vortexus_discount_matrix, 'settings'):
+            delattr(vortexus_discount_matrix, 'settings')
 
     def test_salesperson_cannot_approve(self):
         self.frappe.get_roles.return_value = ['Sales User']

@@ -23,6 +23,7 @@ class SimulationTests(unittest.TestCase):
         columns = ('Dealers', 'Traders', 'Technicians', 'NGOs / Parastatals', 'Corporates', 'End Users / Retail')
         settings.matrix_tables = lambda: ({'Pumps': {c: Decimal(50) for c in columns}}, {'Pumps': {'Dealers': Decimal(30)}})
         settings.customer_mappings = lambda: {'Dealers': 'Dealers'}
+        settings.control_options = lambda: dict(block_below_cost=True, cost_basis='System cost (FIFO)', cost_tolerance=5.0, approver_role='MD')
         self.settings = patch.dict(sys.modules, {settings.__name__: settings})
         self.settings.start()
         sys.modules.pop('vortexus_discount_matrix.simulation', None)

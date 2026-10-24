@@ -66,5 +66,6 @@ def inherited_rows(doc, violations, inspect_source, frappe):
         for row in rows:
             if row.idx in needed and decimal(row.net_rate) >= decimal(original.net_rate):
                 covered[row.idx] = dict(source_doctype=source_type, source_name=source_name,
-                    source_row=source_row, source_fingerprint=result['fingerprint'])
+                    source_row=source_row, source_fingerprint=result['fingerprint'],
+                    source_level=result.get('required_level'))
     return covered

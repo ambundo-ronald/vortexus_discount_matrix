@@ -304,3 +304,30 @@ Deploy, migrate and reload Desk. On staging, compare one item's projected figure
 **New projection basis: Keep price paid.** Each customer group keeps paying its past average price, but never above the proposed price (nobody pays more than the list) and never below the deepest discount the matrix allows (VDM would block it). Groups with no sales history use the matrix maximum. Use this basis to test lowering list prices while keeping net prices the same.
 
 Upgrade: deploy and migrate. Migration adds the new basis to existing sites' Price Simulation form. Open each simulation and save to recalculate. Staging: on an item whose list price was raised this year, confirm Historical no longer projects customers paying more than they did unless the matrix cap forces it; set a proposed price 10% below current with Keep price paid and confirm projected revenue stays close to history.
+
+
+## Version 0.11: discount and margin together, below-cost block, MD approvals, system cost
+
+**Discount and Margin mode.** *Matrix In Use* has a third choice, **Discount and Margin**, which enforces both tables on every controlled line: the maximum discount from Standard Selling *and* the minimum gross margin on cost. Discount Matrix and Margin Matrix still work alone. Upgrading keeps the mode you had.
+
+**Three approval levels.** Each line that breaks a rule records who may authorise it:
+
+| Line | Who can approve |
+|---|---|
+| Discount above the discount matrix, margin still at or above the minimum | Sales Manager or the Margin Approver Role |
+| Margin below the margin minimum, or no cost could be found while a margin rule applies | Margin Approver Role only (default **MD**) |
+| Net price below cost, with *Block Sales Below Cost* ticked | Nobody: the document cannot be submitted (status **Below Cost**) |
+
+The approval records its level. A Sales Manager approval does not cover terms that later need MD approval. Carry-forward from Quotation to Sales Order to Sales Invoice keeps the same rule. Approvals made before 0.11 count as Sales Manager approvals.
+
+**MD role.** Migration creates the Role **MD** (desk access) and gives it read access to VDM Approvals and full access to Price Simulations. Assign it to the Managing Director and any finance approvers. *Margin Approver Role* in VDM Settings can point to a different role.
+
+**Block Sales Below Cost.** New setting, ticked on upgrade (policy: below-cost sales are blocked outright). It applies in every mode, including Discount Matrix, so it protects the business today without switching on the margin table. In Discount Matrix mode a line whose cost cannot be found is not blocked by this rule. Untick to allow below-cost exceptions again (they then need MD approval in a margin mode).
+
+**Cost as ERPNext books it.** Cost is now the cost ERPNext would book if the goods left the row's warehouse now: ERPNext's own incoming-rate calculation over the stock queue (FIFO, LIFO or moving average per the Item/Company valuation method), for the row's stock quantity on the document date. If that warehouse holds no stock, VDM uses the company-wide stock valuation (stock value / quantity across the company's warehouses), then the Item's last purchase rate. The Item master valuation rate is no longer used: stock transactions do not update it. *Cost Basis* can be set to **Higher of system cost and last purchase rate** to price on replacement cost when buying prices are rising. The Price Simulation uses the same cost rules.
+
+**No cost no longer stops saving.** A line with no stock, no valuation and no last purchase rate is flagged for MD approval in margin modes instead of blocking the save.
+
+**Cost tolerance for approvals.** Cost is no longer part of the approved-terms fingerprint, so a stock receipt no longer cancels every open approval. An approval stays valid while each line's cost rises by no more than *Cost Tolerance for Approvals* (default 5%); a cost fall never cancels it. Prices, quantities, customer, limits and taxes are still locked exactly. Existing discount approvals keep their fingerprints.
+
+Upgrade: deploy, migrate, build assets, restart. After migration check VDM Settings: *Block Sales Below Cost* ticked, *Cost Basis* System cost (FIFO), *Cost Tolerance* 5%, *Margin Approver Role* MD. Assign the MD role. Staging: (1) on a stocked item, compare the cost on a Check Discount Matrix line with the cost of goods sold on a Delivery Note for the same quantity; (2) price a line below cost and confirm **Below Cost** and that neither a Sales Manager nor MD can approve; (3) in Discount and Margin mode, price between the margin floor and the discount floor and confirm a Sales Manager can approve; price below the margin floor and confirm only MD can; (4) approve, receive stock at a 3% higher cost and confirm the approval holds, then at 10% higher and confirm a new approval is required; (5) quote an item with no stock in the row warehouse and confirm the company valuation is used.

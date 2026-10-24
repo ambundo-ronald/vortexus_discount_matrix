@@ -61,8 +61,45 @@ def policy():
 MATRIX_COLUMNS = ('Dealers', 'Traders', 'Technicians', 'NGOs / Parastatals', 'Corporates', 'End Users / Retail')
 # Matrix column -> fieldname on the editable VDM Discount Limit rows.
 LIMIT_FIELDS = dict(zip(MATRIX_COLUMNS, ('dealers', 'traders', 'technicians', 'ngos_parastatals', 'corporates', 'end_users_retail')))
-DISCOUNT_MODE, MARGIN_MODE = 'Discount Matrix', 'Margin Matrix'
-MATRIX_MODES = (DISCOUNT_MODE, MARGIN_MODE)
+DISCOUNT_MODE, MARGIN_MODE, BOTH_MODE = 'Discount Matrix', 'Margin Matrix', 'Discount and Margin'
+MATRIX_MODES = (DISCOUNT_MODE, MARGIN_MODE, BOTH_MODE)
+
+# Who may authorise a line. Below cost cannot be authorised when the block is on.
+SALES_MANAGER, MARGIN_APPROVER, BELOW_COST = 'Sales Manager', 'Margin Approver', 'Below Cost'
+LEVEL_RANK = {None: 0, SALES_MANAGER: 1, MARGIN_APPROVER: 2, BELOW_COST: 3}
+SYSTEM_COST, HIGHER_COST = 'System cost (FIFO)', 'Higher of system cost and last purchase rate'
+COST_BASES = (SYSTEM_COST, HIGHER_COST)
+DEFAULT_APPROVER_ROLE = 'MD'
+
+
+def required_level(lines):
+    """Highest approval level any line needs (None when every line is within limits)."""
+    return max((line.get('level') for line in lines), key=lambda level: LEVEL_RANK.get(level, 0), default=None)
+
+
+def covers(approved_level, needed_level):
+    """An approval covers lines needing the same or a lower level. Old approvals have no level: Sales Manager."""
+    if needed_level == BELOW_COST:
+        return False
+    return LEVEL_RANK.get(approved_level or SALES_MANAGER, 1) >= LEVEL_RANK.get(needed_level, 0)
+
+
+def cost_within_tolerance(approved_lines, current_lines, tolerance):
+    """[] when no line's cost rose by more than tolerance% since approval, else descriptions."""
+    approved = {(line.get('row'), line.get('item_code')): line for line in approved_lines or [] if isinstance(line, dict)}
+    risen = []
+    for line in current_lines:
+        old = approved.get((line.get('row'), line.get('item_code')))
+        if not old or line.get('cost_rate') is None:
+            continue
+        before = old.get('cost_rate')
+        if before is None:
+            if line.get('min_margin') is not None:
+                risen.append(f"row {line['row']} has a cost now but had none when approved")
+            continue
+        if decimal(line['cost_rate']) > decimal(before) * (1 + decimal(tolerance) / 100):
+            risen.append(f"row {line['row']} cost rose from {decimal(before):f} to {decimal(line['cost_rate']):f}")
+    return risen
 
 
 def default_limit_rows():
@@ -123,7 +160,24 @@ def mapping_from_rows(rows):
     return result
 
 
-NUMERIC_TERMS = set('row qty conversion_factor rate net_rate net_amount discount_percentage discount_amount additional_discount_percentage conversion_rate reference_price reference_net_rate max_discount minimum_net_rate actual_net_rate effective_discount tax_amount included_in_print_rate row_id cost_rate min_margin actual_margin'.split())
+NUMERIC_TERMS = set('row qty conversion_factor rate net_rate net_amount discount_percentage discount_amount additional_discount_percentage conversion_rate reference_price reference_net_rate max_discount minimum_net_rate actual_net_rate effective_discount tax_amount included_in_print_rate row_id cost_rate min_margin actual_margin margin_floor'.split())
+# Cost moves with every stock receipt. Approved terms are the prices, quantities and
+# limits; cost is checked separately against a tolerance (cost_within_tolerance).
+COST_TERMS = ('cost_rate', 'cost_source', 'actual_margin', 'margin_floor', 'below_cost', 'level', 'description')
+
+
+def approval_terms(snapshot):
+    """Snapshot without cost-derived values, for fingerprints and mismatch messages."""
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get('lines'), list):
+        return snapshot
+    lines = []
+    for line in snapshot['lines']:
+        if isinstance(line, dict):
+            line = {k: v for k, v in line.items() if k not in COST_TERMS}
+            if line.get('min_margin') is not None and line.get('max_discount') is None:
+                line.pop('minimum_net_rate', None)  # margin-only floor = cost / (1 - margin)
+        lines.append(line)
+    return {**snapshot, 'lines': lines}
 
 
 def canonical_terms(value, key=None):
@@ -157,11 +211,11 @@ def canonical_terms(value, key=None):
 
 
 def terms_fingerprint(snapshot):
-    return fingerprint(canonical_terms(snapshot))
+    return fingerprint(canonical_terms(approval_terms(snapshot)))
 
 
 def changed_term_paths(previous, current, path=''):
-    previous, current = canonical_terms(previous), canonical_terms(current)
+    previous, current = canonical_terms(approval_terms(previous)), canonical_terms(approval_terms(current))
     def walk(a, b, p):
         if a == b:
             return []
