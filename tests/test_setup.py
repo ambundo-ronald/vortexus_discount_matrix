@@ -130,3 +130,24 @@ class NavigationTests(unittest.TestCase):
                     repair.execute()
         finally:
             sys.modules.pop(module_name, None)
+
+
+class SimulationBasisUpgradeTests(unittest.TestCase):
+    def test_existing_simulation_doctype_gets_keep_price_paid_option(self):
+        from unittest.mock import Mock
+        frappe = types.ModuleType('frappe')
+        frappe.db = Mock(); frappe.db.exists = Mock(return_value=True)
+        df = types.SimpleNamespace(fieldname='projection_basis', options='Historical discount\nMaximum matrix discount', description='old')
+        doctype = types.SimpleNamespace(fields=[df], save=Mock())
+        frappe.get_doc = Mock(return_value=doctype); frappe.clear_cache = Mock()
+        custom = types.ModuleType('frappe.custom.doctype.custom_field.custom_field'); custom.create_custom_fields = Mock()
+        with patch.dict(sys.modules, {'frappe': frappe, custom.__name__: custom}):
+            sys.modules.pop('vortexus_discount_matrix.setup', None)
+            setup = importlib.import_module('vortexus_discount_matrix.setup')
+            try:
+                self.assertTrue(setup.update_simulation_basis())
+                self.assertIn('Keep price paid', df.options.split('\n'))
+                doctype.save.assert_called_once()
+                self.assertFalse(setup.update_simulation_basis())  # idempotent
+            finally:
+                sys.modules.pop('vortexus_discount_matrix.setup', None)

@@ -293,3 +293,14 @@ Deploy, migrate and reload Desk. On staging, compare one item's projected figure
 **Preview.** The Preview button opens one large table with a row for every item and customer group: item, prices, cost and cost source, then that group's history, assumed discount, expected price and margin, projected revenue and profit, the price and margin at the maximum discount, the margin minimum, and warnings. Type in Filter rows to narrow it, and use Download CSV to open it in a spreadsheet.
 
 **Simulation by customer group.** Each item is simulated for every Customer Group mapped in VDM Settings, plus any unmapped Customer Group with sales in the period. Each group uses its own buying history (quantity and past discount) and its matrix column's limits, so groups that share a column, such as several dealer groups, are shown separately. Below-cost and margin-minimum warnings are listed once per matrix column.
+
+
+## Version 0.10.2: simulation discounts measured against today's price
+
+**Past discount now uses today's Standard Selling price.** Before, a customer group's past discount was measured against the list price printed on its old invoices and then applied to the proposed price. When a list price had since been raised, the simulation assumed customers would pay proportionally more; when an invoice line was in a different UOM, the discount could come out absurd (for example -772%). Past discount is now 1 - average net price paid per stock UOM / current Standard Selling price per stock UOM. Items with no current price fall back to the invoice list prices.
+
+**Discounts are kept between 0 and 100%.** A group that bought above the list price is assumed to pay the list price, never more.
+
+**New projection basis: Keep price paid.** Each customer group keeps paying its past average price, but never above the proposed price (nobody pays more than the list) and never below the deepest discount the matrix allows (VDM would block it). Groups with no sales history use the matrix maximum. Use this basis to test lowering list prices while keeping net prices the same.
+
+Upgrade: deploy and migrate. Migration adds the new basis to existing sites' Price Simulation form. Open each simulation and save to recalculate. Staging: on an item whose list price was raised this year, confirm Historical no longer projects customers paying more than they did unless the matrix cap forces it; set a proposed price 10% below current with Keep price paid and confirm projected revenue stays close to history.

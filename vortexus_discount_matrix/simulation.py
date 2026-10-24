@@ -74,7 +74,8 @@ def refresh(doc):
         cost, row.cost_source = stock_cost(row.item_code, doc.get('warehouse'))
         row.cost = cost or 0
         result = simulate_item(flt(row.proposed_price), cost, history.get(row.item_code, {}), mappings,
-                               discounts.get(row.item_group, {}), margins.get(row.item_group, {}), basis)
+                               discounts.get(row.item_group, {}), margins.get(row.item_group, {}), basis,
+                               current=flt(row.current_price) or None)
         if row.item_group not in discounts:
             warnings.append('Item Group is not in the discount matrix: no maximum discount applies.')
         row.price_change = ((flt(row.proposed_price) / flt(row.current_price) - 1) * 100

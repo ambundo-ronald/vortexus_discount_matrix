@@ -103,6 +103,7 @@ def install():
                     category=row.category, **{name: 0 for name in LIMIT_FIELDS.values()}))
         settings.margins_initialized = 1
         settings.save(ignore_permissions=True)
+    update_simulation_basis()
     install_approval_view()
     install_transaction_fields()
     install_lead_fields()
@@ -144,15 +145,35 @@ def simulation_item_fields():
     ]
 
 
+BASIS_OPTIONS = 'Historical discount\nMaximum matrix discount\nKeep price paid'
+BASIS_DESCRIPTION = ('Historical: each customer group keeps its past discount off today\'s Standard Selling price, capped at the matrix maximum. '
+                     'Maximum: every sale at the highest discount the matrix allows (worst case). '
+                     'Keep price paid: each group keeps paying its past average price, but not above the proposed price '
+                     'or below the matrix floor - use this to test lowering list prices while keeping net prices.')
+
+
+def update_simulation_basis():
+    """Sites installed on 0.10.x keep their DocType; refresh the projection basis choices."""
+    if not frappe.db.exists('DocType', 'VDM Price Simulation'):
+        return
+    simulation = frappe.get_doc('DocType', 'VDM Price Simulation')
+    changed = False
+    for df in simulation.fields:
+        if df.fieldname == 'projection_basis' and (df.options != BASIS_OPTIONS or df.description != BASIS_DESCRIPTION):
+            df.options, df.description, changed = BASIS_OPTIONS, BASIS_DESCRIPTION, True
+    if changed:
+        simulation.save(ignore_permissions=True)
+        frappe.clear_cache(doctype='VDM Price Simulation')
+    return changed
+
+
 def simulation_fields():
     ro = dict(read_only=1)
     return [
         field('title', 'Title', reqd=1, in_list_view=1),
         field('company', 'Company', 'Link', options='Company', reqd=1),
-        field('projection_basis', 'Projection Basis', 'Select', options='Historical discount\nMaximum matrix discount',
-              default='Historical discount', reqd=1,
-              description='Historical: each customer column keeps its past average discount, capped at the matrix maximum. '
-                          'Maximum: every sale at the highest discount the matrix allows (worst case).'),
+        field('projection_basis', 'Projection Basis', 'Select', options=BASIS_OPTIONS,
+              default='Historical discount', reqd=1, description=BASIS_DESCRIPTION),
         field('column_break_settings', '', 'Column Break'),
         field('from_date', 'Sales History From', 'Date', reqd=1),
         field('to_date', 'Sales History To', 'Date', reqd=1),
