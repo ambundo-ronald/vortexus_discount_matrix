@@ -200,3 +200,33 @@ class ApproverUpgradeTests(unittest.TestCase):
         setup.upgrade_doctypes()  # idempotent
         for d in (approval, simulation, settings):
             d.save.assert_called_once()
+
+
+class QuotationGroupFieldTests(unittest.TestCase):
+    def test_customer_group_shown_for_non_customer_quotations_idempotently(self):
+        from unittest.mock import Mock
+        frappe = types.ModuleType('frappe')
+        stored = {}
+        frappe.db = Mock()
+        frappe.db.get_value = Mock(side_effect=lambda dt, filters, field: stored.get(filters['property']))
+        frappe.clear_cache = Mock()
+        custom = types.ModuleType('frappe.custom.doctype.custom_field.custom_field'); custom.create_custom_fields = Mock()
+        ps = types.ModuleType('frappe.custom.doctype.property_setter.property_setter')
+        calls = []
+        def make(doctype, fieldname, prop, value, kind, validate_fields_for_doctype=True):
+            calls.append((doctype, fieldname, prop, value, validate_fields_for_doctype))
+            stored[prop] = value
+        ps.make_property_setter = make
+        with patch.dict(sys.modules, {'frappe': frappe, custom.__name__: custom, ps.__name__: ps}):
+            sys.modules.pop('vortexus_discount_matrix.setup', None)
+            setup = importlib.import_module('vortexus_discount_matrix.setup')
+            try:
+                self.assertTrue(setup.install_quotation_group_field())
+                self.assertFalse(setup.install_quotation_group_field())
+            finally:
+                sys.modules.pop('vortexus_discount_matrix.setup', None)
+        self.assertEqual({c[2] for c in calls}, {'hidden', 'depends_on', 'description'})
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(c[:2] == ('Quotation', 'customer_group') and c[4] is False for c in calls))
+        self.assertEqual(stored['hidden'], '0')
+        self.assertIn('!= "Customer"', stored['depends_on'])

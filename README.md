@@ -331,3 +331,29 @@ The approval records its level. A Sales Manager approval does not cover terms th
 **Cost tolerance for approvals.** Cost is no longer part of the approved-terms fingerprint, so a stock receipt no longer cancels every open approval. An approval stays valid while each line's cost rises by no more than *Cost Tolerance for Approvals* (default 5%); a cost fall never cancels it. Prices, quantities, customer, limits and taxes are still locked exactly. Existing discount approvals keep their fingerprints.
 
 Upgrade: deploy, migrate, build assets, restart. After migration check VDM Settings: *Block Sales Below Cost* ticked, *Cost Basis* System cost (FIFO), *Cost Tolerance* 5%, *Margin Approver Role* MD. Assign the MD role. Staging: (1) on a stocked item, compare the cost on a Check Discount Matrix line with the cost of goods sold on a Delivery Note for the same quantity; (2) price a line below cost and confirm **Below Cost** and that neither a Sales Manager nor MD can approve; (3) in Discount and Margin mode, price between the margin floor and the discount floor and confirm a Sales Manager can approve; price below the margin floor and confirm only MD can; (4) approve, receive stock at a 3% higher cost and confirm the approval holds, then at 10% higher and confirm a new approval is required; (5) quote an item with no stock in the row warehouse and confirm the company valuation is used.
+
+
+## Version 0.11.1: Frappe CRM quotations
+
+Frappe CRM creates quotations addressed to a **CRM Deal** (Quotation To = CRM Deal), which VDM previously rejected with "Discount Matrix supports quotations to a Customer or Lead". VDM now finds the customer group for any quotation that is not addressed to a Customer:
+
+- **CRM Deal already converted to an ERPNext Customer** (the deal's *Customer in ERPNext* is set): that Customer's group.
+- **Otherwise, the quotation's own Customer Group.** This standard field was hidden; migration makes it visible on quotations not addressed to a Customer. Select it before quoting matrix-controlled items. A quotation with only items outside the matrix needs no group.
+- **ERPNext Lead**: the Lead's Customer Group as before, otherwise the quotation's Customer Group.
+
+The customer group is recorded in the approval, so changing it after approval requires a new approval.
+
+Deploy, migrate, then hard-refresh. Staging: create a quotation from a CRM deal, confirm Customer Group is visible and the check asks for it; select a group and confirm its limits apply; convert the deal to a Customer and confirm the Customer's group is used.
+
+**Approve once: connected documents inherit.** An approval given on a document now carries to every document made from it, without asking again:
+
+- **The source is judged by how it was submitted.** A submitted Quotation or Sales Order that went through as *Approved Exception* (with its VDM Approval record) or *Inherited Exception* authorises the documents made from it. Later changes to Standard Selling prices, costs or matrix percentages no longer cancel the inheritance; before, the source was re-checked against today's data, which made orders and invoices ask for approval again.
+- **The chain is followed.** Quotation → Sales Order → Sales Invoice (directly or through a Delivery Note) inherits at each step. The approval level is carried too: an MD approval on the quotation covers margin exceptions on the order and invoice.
+- **Lead and CRM Deal quotations carry forward** to the Sales Order for the Customer they became. When the system records that Customer (the Lead's Customer, or the deal's *Customer in ERPNext*), the order's customer must match it; otherwise the order's native link to the quotation row is the proof.
+- **Amended documents keep the approval** of the document they amend when the terms are unchanged.
+- **A new approval is still required** when a downstream line is worse than what was approved: a lower net price, more quantity than the source row across all submitted documents, a different item or UOM, a different company or currency, or a price below cost (never approvable). Rows added without a link to the approved document are checked normally. The check names the reason, for example "Row 1: net price 140 is below the 150 approved on Sales Order SO-0009; a new approval is required." A price above the approved one still inherits: the customer pays more than was approved.
+
+A Sales Invoice made directly from a Quotation (without a Sales Order or Delivery Note) has no row link back to the quotation in ERPNext, so it is checked on its own.
+
+Staging: approve and submit a quotation; raise that item's Standard Selling price; create, submit and invoice the Sales Order and confirm no approval is requested; repeat from a CRM Deal quotation; cancel and amend an approved draft and confirm the approval holds; lower the invoice price below the approved price and confirm a new approval is required.
+

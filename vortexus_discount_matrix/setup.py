@@ -37,8 +37,8 @@ def install():
             field('approved_at', 'Approved At', 'Datetime', reqd=1),
             field('snapshot', 'Approved Terms', 'Long Text', reqd=1),
             field('approval_level', 'Approval Level', 'Select', options='Sales Manager\nMargin Approver', read_only=1),
-        ], permissions=[dict(role='Sales Manager', read=1), dict(role='System Manager', read=1),
-                        dict(role=DEFAULT_APPROVER_ROLE, read=1)]),
+        ], permissions=[approval_perm('Sales Manager'), approval_perm('System Manager', delete=1),
+                        approval_perm(DEFAULT_APPROVER_ROLE)]),
     }
     for name, definition in definitions.items():
         if not frappe.db.exists('DocType', name):
@@ -133,6 +133,13 @@ def install():
     install_sidebar()
 
 
+def approval_perm(role, delete=0):
+    """Read-only access to approval records. DocPerm defaults write/create/delete/share
+    to 1, so every flag is explicit. Records are only created by approve()."""
+    return dict(role=role, permlevel=0, read=1, write=0, create=0, delete=delete,
+                report=1, export=1, print=1, email=1, share=0)
+
+
 def install_approver_role():
     """The margin approver (MD) role. Assign it to the Managing Director and any finance approvers."""
     if not frappe.db.exists('Role', DEFAULT_APPROVER_ROLE):
@@ -148,7 +155,7 @@ def upgrade_doctypes():
                                         options='Sales Manager\nMargin Approver', read_only=1))
         changed = True
     if not any(p.role == DEFAULT_APPROVER_ROLE for p in approval.permissions):
-        approval.append('permissions', dict(role=DEFAULT_APPROVER_ROLE, read=1))
+        approval.append('permissions', approval_perm(DEFAULT_APPROVER_ROLE))
         changed = True
     if changed:
         approval.save(ignore_permissions=True)
@@ -345,3 +352,29 @@ def install_lead_fields():
         insert_after='lead_name',
         description='Used by Discount Matrix for quotations addressed to this Lead. Select before quoting matrix-controlled items.',
     )]}, ignore_validate=True, update=True)
+    install_quotation_group_field()
+
+
+QUOTATION_GROUP_PROPERTIES = [
+    # Quotation.customer_group is a hidden standard field. Show it when the quotation is not
+    # addressed to a Customer (Frappe CRM Deal, Lead, Prospect) so its matrix group can be set.
+    ('hidden', '0', 'Check'),
+    ('depends_on', 'eval:doc.quotation_to && doc.quotation_to != "Customer"', 'Data'),
+    ('description', 'Used by Discount Matrix when this quotation is not addressed to a Customer, '
+                    'for example a Frappe CRM Deal. Select before quoting matrix-controlled items.', 'Text'),
+]
+
+
+def install_quotation_group_field():
+    from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+    changed = False
+    for prop, value, kind in QUOTATION_GROUP_PROPERTIES:
+        current = frappe.db.get_value('Property Setter', {'doc_type': 'Quotation', 'field_name': 'customer_group',
+                                                          'property': prop}, 'value')
+        if current != value:
+            # Validating the whole Quotation would also check unrelated site customizations.
+            make_property_setter('Quotation', 'customer_group', prop, value, kind, validate_fields_for_doctype=False)
+            changed = True
+    if changed:
+        frappe.clear_cache(doctype='Quotation')
+    return changed

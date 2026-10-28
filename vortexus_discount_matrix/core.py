@@ -187,8 +187,8 @@ def canonical_terms(value, key=None):
         # Normalize only a blank/matching alias, never a conflicting identity.
         header = value.get('header')
         if value.get('doctype') == 'Quotation' and isinstance(header, dict):
-            if header.get('quotation_to') == 'Lead' and header.get('party_name'):
-                # The Lead identity is party_name, not a transient customer alias.
+            if header.get('quotation_to') not in (None, '', 'Customer') and header.get('party_name'):
+                # A Lead or CRM Deal identity is party_name, not a transient customer alias.
                 value = {**value, 'header': {**header, 'customer': None}}
             party = header.get('party_name')
             if (header.get('quotation_to') == 'Customer' and party

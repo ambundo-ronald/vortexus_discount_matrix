@@ -46,16 +46,26 @@ def approval_options():
 def customer_group(doc):
     customer = doc.get('customer')
     if doc.doctype == 'Quotation':
-        if doc.get('quotation_to') == 'Lead':
+        party_type = doc.get('quotation_to')
+        if party_type == 'Lead':
             lead = doc.get('party_name')
             if not lead:
                 frappe.throw('Select a Lead before checking Discount Matrix.')
-            group = frappe.db.get_value('Lead', lead, 'custom_customer_group')
+            group = frappe.db.get_value('Lead', lead, 'custom_customer_group') or doc.get('customer_group')
             if not group:
-                frappe.throw('Set Customer Group on the Lead before checking Discount Matrix.')
+                frappe.throw('Set Customer Group on the Lead or on this quotation before checking Discount Matrix.')
             return group
-        if doc.get('quotation_to') != 'Customer':
-            frappe.throw('Discount Matrix supports quotations to a Customer or Lead.')
+        if party_type != 'Customer':
+            # Frappe CRM quotes a CRM Deal; other apps may quote other parties.
+            # Use the deal's ERPNext Customer once converted, else the quotation's Customer Group.
+            if party_type == 'CRM Deal' and doc.get('party_name'):
+                converted = frappe.db.get_value('CRM Deal', doc.get('party_name'), 'erpnext_customer')
+                if converted and frappe.db.exists('Customer', converted):
+                    return frappe.db.get_value('Customer', converted, 'customer_group')
+            if not doc.get('customer_group'):
+                frappe.throw(f'Set Customer Group on this quotation (quoted to {party_type or "no party"}) '
+                             'before checking Discount Matrix.')
+            return doc.get('customer_group')
         customer = doc.get('party_name')
     if not customer:
         frappe.throw('Select a Customer before checking Discount Matrix.')
@@ -138,13 +148,17 @@ def inspect(doc):
             result['message'] = 'An authorised manager explicitly approved an exception for these exact terms.'
     if exceptions_enabled and result['violations'] and result['status'] != 'Approved Exception':
         from vortexus_discount_matrix.carry_forward import inherited_rows
-        inherited = inherited_rows(doc, result['violations'], inspect, frappe)
+        notes = {}
+        inherited = inherited_rows(doc, result['violations'], frappe, notes)
         # A source approval covers only lines needing the same or a lower approval level.
         levels = {v['row']: v.get('level') for v in result['violations']}
         inherited = {row: entry for row, entry in inherited.items()
                      if covers(entry.get('source_level') or SALES_MANAGER, levels.get(row))}
         result['inherited_approvals'] = inherited
         result['violations'] = [v for v in result['violations'] if v['row'] not in inherited]
+        result['inheritance_notes'] = [notes[v['row']] for v in result['violations'] if v['row'] in notes]
+        if result['inheritance_notes']:
+            result['message'] += ' ' + ' '.join(result['inheritance_notes'])
         if not result['violations']:
             result['status'] = 'Inherited Exception'
             references = sorted({v['source_doctype'] + ' ' + v['source_name'] for v in inherited.values()})
@@ -226,6 +240,11 @@ def matching_approval(doc, result, opts=None):
     opts = opts or options()
     needed = result.get('required_level') or SALES_MANAGER
     filters = {'reference_doctype': doc.doctype, 'reference_name': doc.name}
+    names = [doc.name]
+    if getattr(doc, 'amended_from', None):
+        # An amendment keeps the approval of the document it amends when the terms are unchanged.
+        from vortexus_discount_matrix.carry_forward import amendment_chain
+        names += [n for n in amendment_chain(doc.doctype, doc.amended_from, frappe) if n not in names]
     cost_checked = any(line.get('cost_rate') is not None for line in result.get('lines') or [])
     if not cost_checked:
         exact = {**filters, 'fingerprint': result['fingerprint']}
@@ -235,13 +254,15 @@ def matching_approval(doc, result, opts=None):
             return True
     # Existing records retain their original hashes and snapshots. Compare
     # equivalent representations without rewriting the historical audit data.
-    records = frappe.get_all('VDM Approval', filters=filters,
-        fields=['name', 'snapshot', 'approval_level'], order_by='creation desc')
+    records = frappe.get_all('VDM Approval', filters={**filters, 'reference_name': ['in', names]} if len(names) > 1 else filters,
+        fields=['name', 'snapshot', 'approval_level', 'reference_name'], order_by='creation desc')
     for index, record in enumerate(records):
         try:
             old = json.loads(record['snapshot'])
             if not isinstance(old, dict):
                 continue
+            if record.get('reference_name') not in (None, doc.name):
+                old = {**old, 'document': doc.name}  # approved on the document this one amends
             if terms_fingerprint(old) == result['fingerprint']:
                 if not covers(record.get('approval_level'), needed):
                     result['approval_mismatch'] = (f"The earlier approval was by {level_label(record.get('approval_level') or SALES_MANAGER, opts)}; "
@@ -293,7 +314,8 @@ def describe(r, opts=None):
 
 def summary(result):
     details = '\n'.join(r.get('description') or describe(r) for r in result['violations'])
-    return details + ('\n' + result['approval_mismatch'] if result.get('approval_mismatch') else '')
+    extra = list(result.get('inheritance_notes') or []) + ([result['approval_mismatch']] if result.get('approval_mismatch') else [])
+    return '\n'.join([details] + extra) if extra else details
 
 
 def validate(doc, method=None):
