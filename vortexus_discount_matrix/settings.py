@@ -1,7 +1,8 @@
 import frappe
 from frappe.utils import flt
 from vortexus_discount_matrix.core import (mapping_from_rows, limits_from_rows,
-    DISCOUNT_MODE, MARGIN_MODE, BOTH_MODE, MATRIX_MODES, SYSTEM_COST, COST_BASES, DEFAULT_APPROVER_ROLE)
+    DISCOUNT_MODE, MARGIN_MODE, BOTH_MODE, MATRIX_MODES, SYSTEM_COST, COST_BASES, DEFAULT_APPROVER_ROLE,
+    MARGIN_FLOOR_ACTIONS, BLOCK_FLOOR)
 
 
 def validate(doc, method=None):
@@ -10,8 +11,15 @@ def validate(doc, method=None):
             raise ValueError('Select Discount Matrix, Margin Matrix or Discount and Margin.')
         if doc.get('cost_basis') and doc.get('cost_basis') not in COST_BASES:
             raise ValueError('Select a valid Cost Basis.')
+        if doc.get('margin_floor_action') and doc.get('margin_floor_action') not in MARGIN_FLOOR_ACTIONS:
+            raise ValueError('Select what happens below the margin floor: Block, or Approval by margin approver.')
         if not 0 <= flt(doc.get('cost_tolerance')) <= 100:
             raise ValueError('Cost tolerance must be between 0 and 100%.')
+        if not 0 <= flt(doc.get('intercompany_markup')) <= 1000:
+            raise ValueError('Intercompany markup must be between 0 and 1000%.')
+        group = doc.get('intercompany_customer_group')
+        if group and any(r.get('customer_group') == group for r in doc.get('customer_mappings') or []):
+            raise ValueError(f'{group} is the intercompany Customer Group, so it cannot also be mapped to a matrix column.')
         mapping_from_rows(doc.get('customer_mappings') or [])
         limits_from_rows(doc.get('discount_limits') or [])
         limits_from_rows(doc.get('margin_limits') or [], MARGIN_MODE)
@@ -70,7 +78,9 @@ def control_options():
     basis = value('cost_basis')
     tolerance = value('cost_tolerance')
     role = value('margin_approver_role')
+    action = value('margin_floor_action')
     return dict(
+        margin_floor_action=action if action in MARGIN_FLOOR_ACTIONS else BLOCK_FLOOR,
         block_below_cost=str(1 if block is None else block) in ('1', 'True'),
         cost_basis=basis if basis in COST_BASES else SYSTEM_COST,
         cost_tolerance=flt(tolerance) if isinstance(tolerance, (int, float, str)) and not isinstance(tolerance, bool) else 5.0,

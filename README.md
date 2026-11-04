@@ -357,3 +357,23 @@ A Sales Invoice made directly from a Quotation (without a Sales Order or Deliver
 
 Staging: approve and submit a quotation; raise that item's Standard Selling price; create, submit and invoice the Sales Order and confirm no approval is requested; repeat from a CRM Deal quotation; cancel and amend an approved draft and confirm the approval holds; lower the invoice price below the approved price and confirm a new approval is required.
 
+
+## Version 0.12: intercompany pricing at cost plus markup
+
+Group companies (Norwa Water Solutions, Everfresh, Norwa Africa, Reesolmart) buy at system cost plus a fixed markup instead of the Standard Selling price list.
+
+- New VDM Settings fields: **Price Intercompany Sales at Cost Plus Markup** (on by default), **Intercompany Customer Group** (default `Intercompany`) and **Intercompany Markup on Cost (%)** (default 10).
+- On every draft save of a Quotation, Sales Order or Sales Invoice for a customer in that group, each line is priced at `cost x (1 + markup)`, rounded up. Item discounts and margins on those lines are cleared.
+- Cost is the same cost VDM uses for the below-cost and margin checks: ERPNext FIFO cost in the row warehouse, then company stock valuation, then last purchase rate. Because it is read at save time, landed cost vouchers and new receipts are picked up automatically; there is no price list to maintain.
+- Lines copied from an earlier document (quotation to order, order or delivery note to invoice) keep the price agreed there, so an invoice matches its order.
+- A line with no cost in the system keeps the rate entered and the user is told to price it manually.
+- Quotations count when addressed to an intercompany Customer, or to a Frappe CRM Deal that has become one. Leads and unconverted deals are priced normally.
+- Submitted documents and returns are never repriced.
+- The intercompany Customer Group cannot also be mapped to a matrix column; the discount and margin matrix does not apply to group companies.
+
+### Hard block below the margin floor
+
+- New VDM Settings field **Below the Margin Floor**: `Block` (default, set on upgrade) or `Approval by margin approver`.
+- With `Block`, a line priced below its item group's margin floor gets the status **Below Margin Floor**. Like a price below cost, it cannot be submitted and no Sales Manager or MD approval can release it, including earlier approval records and carried-forward approvals. Increase the price.
+- A line with no known cost cannot be proved to meet the floor. With `Block`, it needs a Sales Manager approval with a reason, so the items without a cost in the system can still be sold. With `Approval by margin approver`, it needs the margin approver as before.
+- The margin floor is enforced only when **Matrix In Use** is `Margin Matrix` or `Discount and Margin`.

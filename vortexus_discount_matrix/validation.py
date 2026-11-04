@@ -4,7 +4,7 @@ from frappe.utils import flt
 from erpnext.controllers.taxes_and_totals import calculate_taxes_and_totals
 from vortexus_discount_matrix.core import (limit, minimum_price, effective_discount, margin_minimum_price,
     gross_margin, terms_fingerprint, changed_term_paths, DISCOUNT_MODE, MARGIN_MODE, BOTH_MODE,
-    SALES_MANAGER, MARGIN_APPROVER, BELOW_COST, LEVEL_RANK, required_level, covers, cost_within_tolerance)
+    SALES_MANAGER, MARGIN_APPROVER, BELOW_COST, BELOW_FLOOR, BLOCK_FLOOR, LEVEL_RANK, required_level, covers, cost_within_tolerance)
 from vortexus_discount_matrix.prices import reference_rate, cost_rate
 
 DOCTYPES = ('Quotation', 'Sales Order', 'Sales Invoice')
@@ -33,7 +33,8 @@ def user_level(opts):
 
 def level_label(level, opts):
     return {SALES_MANAGER: f"a Sales Manager or {opts['approver_role']}", MARGIN_APPROVER: opts['approver_role'],
-            BELOW_COST: 'nobody: below-cost sales are blocked'}.get(level, '')
+            BELOW_COST: 'nobody: below-cost sales are blocked',
+            BELOW_FLOOR: 'nobody: sales below the margin floor are blocked'}.get(level, '')
 
 
 @frappe.whitelist()
@@ -131,6 +132,11 @@ def inspect(doc):
         result['message'] = ('A price is below cost. Selling below cost is blocked and cannot be approved. '
                              'Increase the selling price.')
         return result
+    if needed == BELOW_FLOOR:
+        result['status'] = 'Below Margin Floor'
+        result['message'] = ('A price is below the minimum margin for its item group. Sales below the margin floor are '
+                             'blocked and cannot be approved. Increase the selling price.')
+        return result
     result['status'] = 'Adjust Price' if result['violations'] else 'Within Limit'
     if result['violations']:
         margin_breach = needed == MARGIN_APPROVER
@@ -187,15 +193,22 @@ def check_lines(doc, applicable, actual_groups, discount_lines, need_cost, opts,
             level = SALES_MANAGER
         if minimum_margin is not None:
             line['min_margin'] = float(minimum_margin)
+            block_floor = opts.get('margin_floor_action') == BLOCK_FLOOR
             if cost is None:
-                level = MARGIN_APPROVER  # unknown cost: cannot prove the margin
+                # Unknown cost: the margin cannot be proved. With the floor blocked, a Sales Manager
+                # may still approve it with a reason, so items without a cost can be sold.
+                level = SALES_MANAGER if block_floor else MARGIN_APPROVER
             else:
                 floor = float(margin_minimum_price(cost, minimum_margin, precision))
                 line['margin_floor'] = floor
                 if cap is None:
                     line['minimum_net_rate'] = floor
                 if net < floor:
-                    level = MARGIN_APPROVER
+                    if block_floor:
+                        line['below_floor'] = True
+                        level = BELOW_FLOOR
+                    else:
+                        level = MARGIN_APPROVER
         if opts['block_below_cost'] and cost is not None and net < flt(cost, precision):
             line['below_cost'] = True
             level = BELOW_COST
@@ -286,6 +299,8 @@ def describe(r, opts=None):
     opts = opts or {'approver_role': 'MD'}
     if r.get('below_cost'):
         tail = f" BELOW COST {r['cost_rate']:g}: blocked."
+    elif r.get('below_floor'):
+        tail = f" BELOW MARGIN FLOOR {r['margin_floor']:g}: blocked."
     elif r.get('level') == MARGIN_APPROVER:
         tail = f" Needs approval by {opts['approver_role']}."
     else:
@@ -319,19 +334,26 @@ def summary(result):
 
 
 def validate(doc, method=None):
+    from vortexus_discount_matrix.intercompany import apply as intercompany_price
+    intercompany = intercompany_price(doc) if getattr(doc, 'doctype', None) in DOCTYPES else None
     if not enabled():
         doc.custom_vdm_status = 'Disabled'
-        doc.custom_vdm_summary = 'Discount Matrix enforcement is disabled in VDM Settings. Prices are not being blocked.'
+        doc.custom_vdm_summary = intercompany or 'Discount Matrix enforcement is disabled in VDM Settings. Prices are not being blocked.'
         return
     result = inspect(doc)
     doc.custom_vdm_status = result['status']
     doc.custom_vdm_summary = summary(result) or result.get('message', '')
+    if intercompany:
+        doc.custom_vdm_summary = intercompany + ' ' + doc.custom_vdm_summary
 
 
 def before_submit(doc, method=None):
     validate(doc)
     if doc.custom_vdm_status == 'Below Cost':
         frappe.throw('A price is below cost. Selling below cost is blocked. Increase the selling price before submitting.\n' + doc.custom_vdm_summary)
+    if doc.custom_vdm_status == 'Below Margin Floor':
+        frappe.throw('A price is below the margin floor for its item group. Sales below the margin floor are blocked. '
+                     'Increase the selling price before submitting.\n' + doc.custom_vdm_summary)
     if doc.custom_vdm_status in ('Adjust Price', 'Pending Approval'):
         frappe.throw('Price is below the permitted matrix minimum. Increase the selling price or reduce the discount before submitting.\n' + doc.custom_vdm_summary)
 
@@ -382,6 +404,8 @@ def approve(doctype, name, reason):
     result = inspect(doc)
     if result.get('required_level') == BELOW_COST:
         frappe.throw('A price is below cost. Selling below cost is blocked and cannot be approved.')
+    if result.get('required_level') == BELOW_FLOOR:
+        frappe.throw('A price is below the margin floor. Sales below the margin floor are blocked and cannot be approved.')
     if not result['violations']:
         frappe.throw('This document does not require a discount exception.')
     if not covers(level, result.get('required_level')):

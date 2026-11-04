@@ -1,10 +1,10 @@
 ;(() => {
   const method = 'vortexus_discount_matrix.validation.';
   const escape = value => frappe.utils.escape_html(String(value ?? ''));
-  const isViolation = status => ['Adjust Price', 'Pending Approval', 'Below Cost'].includes(status);
+  const isViolation = status => ['Adjust Price', 'Pending Approval', 'Below Cost', 'Below Margin Floor'].includes(status);
 
   function render(frm, result, showDialog) {
-    const colors = {'Below Cost': 'red', 'Adjust Price': 'red', 'Pending Approval': 'red', 'Disabled': 'orange', 'Not Applicable': 'orange', 'Approved Exception': 'blue', 'Inherited Exception': 'blue', 'Within Limit': 'green'};
+    const colors = {'Below Cost': 'red', 'Below Margin Floor': 'red', 'Adjust Price': 'red', 'Pending Approval': 'red', 'Disabled': 'orange', 'Not Applicable': 'orange', 'Approved Exception': 'blue', 'Inherited Exception': 'blue', 'Within Limit': 'green'};
     const color = colors[result.status] || 'orange';
     let content = `<b>${escape(result.status)}</b><br>${escape(result.message)}`;
     if (result.lines?.length) {
@@ -75,6 +75,8 @@
         }
         if (frm.doc.custom_vdm_status === 'Below Cost') {
           frm.dashboard.set_headline_alert(__('A price is below cost. Selling below cost is blocked and cannot be approved. Increase the selling price.'), 'red');
+        } else if (frm.doc.custom_vdm_status === 'Below Margin Floor') {
+          frm.dashboard.set_headline_alert(__('A price is below the margin floor for its item group. It is blocked and cannot be approved. Increase the selling price.'), 'red');
         } else if (isViolation(frm.doc.custom_vdm_status)) {
           frm.dashboard.set_headline_alert(__('Price is below the permitted matrix minimum. Increase the selling price or reduce the discount.'), 'red');
         } else if (frm.doc.custom_vdm_status === 'Disabled') {

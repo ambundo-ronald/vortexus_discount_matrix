@@ -35,6 +35,14 @@ def margin_minimum_price(cost, margin, precision=2):
     return (cost / (1 - margin / 100)).quantize(Decimal(1).scaleb(-precision), rounding=ROUND_CEILING)
 
 
+def intercompany_rate(cost, markup, precision=2):
+    """Group-company selling price: cost plus markup%, rounded up so it never falls below cost plus markup."""
+    cost, markup = decimal(cost), decimal(markup)
+    if cost <= 0 or markup < 0:
+        raise ValueError("Invalid cost or intercompany markup")
+    return (cost * (1 + markup / 100)).quantize(Decimal(1).scaleb(-precision), rounding=ROUND_CEILING)
+
+
 def gross_margin(cost, actual):
     """Gross margin on price as a percentage; None when the price is not positive."""
     actual = decimal(actual)
@@ -66,10 +74,15 @@ MATRIX_MODES = (DISCOUNT_MODE, MARGIN_MODE, BOTH_MODE)
 
 # Who may authorise a line. Below cost cannot be authorised when the block is on.
 SALES_MANAGER, MARGIN_APPROVER, BELOW_COST = 'Sales Manager', 'Margin Approver', 'Below Cost'
-LEVEL_RANK = {None: 0, SALES_MANAGER: 1, MARGIN_APPROVER: 2, BELOW_COST: 3}
+# Below the margin floor when VDM Settings blocks it: like below cost, nobody can approve.
+BELOW_FLOOR = 'Below Margin Floor'
+LEVEL_RANK = {None: 0, SALES_MANAGER: 1, MARGIN_APPROVER: 2, BELOW_FLOOR: 3, BELOW_COST: 3}
+BLOCK_FLOOR, APPROVE_FLOOR = 'Block', 'Approval by margin approver'
+MARGIN_FLOOR_ACTIONS = (BLOCK_FLOOR, APPROVE_FLOOR)
 SYSTEM_COST, HIGHER_COST = 'System cost (FIFO)', 'Higher of system cost and last purchase rate'
 COST_BASES = (SYSTEM_COST, HIGHER_COST)
 DEFAULT_APPROVER_ROLE = 'MD'
+DEFAULT_INTERCOMPANY_GROUP, DEFAULT_INTERCOMPANY_MARKUP = 'Intercompany', 10
 
 
 def required_level(lines):
@@ -79,7 +92,7 @@ def required_level(lines):
 
 def covers(approved_level, needed_level):
     """An approval covers lines needing the same or a lower level. Old approvals have no level: Sales Manager."""
-    if needed_level == BELOW_COST:
+    if needed_level in (BELOW_COST, BELOW_FLOOR):
         return False
     return LEVEL_RANK.get(approved_level or SALES_MANAGER, 1) >= LEVEL_RANK.get(needed_level, 0)
 

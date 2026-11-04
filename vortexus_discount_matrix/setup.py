@@ -1,6 +1,7 @@
 import frappe
 from vortexus_discount_matrix.core import (MATRIX_COLUMNS, MATRIX_MODES, DISCOUNT_MODE, LIMIT_FIELDS, default_limit_rows, policy,
-    COST_BASES, SYSTEM_COST, DEFAULT_APPROVER_ROLE)
+    COST_BASES, SYSTEM_COST, DEFAULT_APPROVER_ROLE, DEFAULT_INTERCOMPANY_GROUP, DEFAULT_INTERCOMPANY_MARKUP,
+    MARGIN_FLOOR_ACTIONS, BLOCK_FLOOR)
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
@@ -49,6 +50,8 @@ def install():
     approvals_added = not any(f.fieldname == 'allow_manager_approvals' for f in settings_type.fields)
     mode_added = not any(f.fieldname == 'matrix_mode' for f in settings_type.fields)
     controls_added = not any(f.fieldname == 'block_below_cost' for f in settings_type.fields)
+    intercompany_added = not any(f.fieldname == 'intercompany_pricing' for f in settings_type.fields)
+    floor_action_added = not any(f.fieldname == 'margin_floor_action' for f in settings_type.fields)
     for definition in [
         field('allow_manager_approvals', 'Allow Sales Manager Discount Exceptions', 'Check', default='1',
             description='When unchecked, direct and inherited exceptions cannot authorize submission. Existing approval records are retained.'),
@@ -80,6 +83,18 @@ def install():
         field('margin_approver_role', 'Margin Approver Role', 'Link', options='Role', default=DEFAULT_APPROVER_ROLE,
             description='Approves prices below the margin minimum and lines without a known cost. '
                         'Sales Managers approve discount-matrix exceptions only.'),
+        field('margin_floor_action', 'Below the Margin Floor', 'Select', options='\n'.join(MARGIN_FLOOR_ACTIONS), default=BLOCK_FLOOR,
+            description='Block: a price below the margin floor cannot be submitted or approved by anyone, like a price below cost. '
+                        'Lines without a known cost then need a Sales Manager approval with a reason. '
+                        'Approval by margin approver: the Margin Approver Role may approve with a reason.'),
+        field('intercompany_pricing', 'Price Intercompany Sales at Cost Plus Markup', 'Check', default='1',
+            description='Customers in the intercompany Customer Group are priced at system cost plus the markup on every draft save. '
+                        'Discounts are cleared; lines copied from an earlier document keep that price. Lines without a cost are left for manual entry.'),
+        field('intercompany_customer_group', 'Intercompany Customer Group', 'Link', options='Customer Group',
+              default=DEFAULT_INTERCOMPANY_GROUP,
+              description='Group companies. Must not be mapped to a matrix column, so the discount and margin matrix does not apply.'),
+        field('intercompany_markup', 'Intercompany Markup on Cost (%)', 'Percent', default=str(DEFAULT_INTERCOMPANY_MARKUP),
+              description='Selling price = system cost x (1 + markup). 10 means cost plus 10%.'),
     ]:
         if not any(f.fieldname == definition['fieldname'] for f in settings_type.fields):
             settings_type.append('fields', definition)
@@ -88,7 +103,7 @@ def install():
     settings_type.save(ignore_permissions=True)
     frappe.clear_cache(doctype='VDM Settings')
     settings = frappe.get_doc('VDM Settings')
-    if approvals_added or mode_added or controls_added or not settings.get('matrix_mode'):
+    if approvals_added or mode_added or controls_added or intercompany_added or floor_action_added or not settings.get('matrix_mode'):
         if approvals_added:
             settings.allow_manager_approvals = 1
         if not settings.get('matrix_mode'):
@@ -99,6 +114,13 @@ def install():
             settings.cost_basis = SYSTEM_COST
             settings.cost_tolerance = 5
             settings.margin_approver_role = DEFAULT_APPROVER_ROLE
+        if floor_action_added:
+            settings.margin_floor_action = BLOCK_FLOOR
+        if intercompany_added:
+            settings.intercompany_pricing = 1
+            if frappe.db.exists('Customer Group', DEFAULT_INTERCOMPANY_GROUP):
+                settings.intercompany_customer_group = DEFAULT_INTERCOMPANY_GROUP
+            settings.intercompany_markup = DEFAULT_INTERCOMPANY_MARKUP
         settings.save(ignore_permissions=True)
     if not settings.get('mappings_initialized'):
         # Seed once. An intentionally emptied table must remain empty on migration.
@@ -302,7 +324,7 @@ def install_approval_view():
 def order_settings_fields(settings_type):
     # Put controls before the long mapping grid on upgraded sites as well.
     order = ['enabled', 'allow_manager_approvals', 'matrix_mode', 'block_below_cost', 'cost_basis', 'cost_tolerance',
-             'margin_approver_role', 'price_list',
+             'margin_floor_action', 'margin_approver_role', 'intercompany_pricing', 'intercompany_customer_group', 'intercompany_markup', 'price_list',
              'customer_mappings', 'mappings_initialized', 'discount_limits', 'limits_initialized',
              'margin_limits', 'margins_initialized']
     fields = list(settings_type.fields)
