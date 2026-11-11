@@ -377,3 +377,37 @@ Group companies (Norwa Water Solutions, Everfresh, Norwa Africa, Reesolmart) buy
 - With `Block`, a line priced below its item group's margin floor gets the status **Below Margin Floor**. Like a price below cost, it cannot be submitted and no Sales Manager or MD approval can release it, including earlier approval records and carried-forward approvals. Increase the price.
 - A line with no known cost cannot be proved to meet the floor. With `Block`, it needs a Sales Manager approval with a reason, so the items without a cost in the system can still be sold. With `Approval by margin approver`, it needs the margin approver as before.
 - The margin floor is enforced only when **Matrix In Use** is `Margin Matrix` or `Discount and Margin`.
+
+## Version 0.12.1: quieter on-screen messages
+
+- No dialog after every save. The check runs in the background and its result shows as one panel at the top of the form.
+- The panel lists only the lines with a problem: row, item, the net price entered, the lowest allowed price and the issue. Lines that pass are not listed.
+- Colours: red only when a price is blocked (below cost or below the margin floor), orange when it can be fixed or approved, green when all prices pass.
+- Problem rows are shaded in the items table.
+- Each problem line has a "Use lowest" button. It sets the rate so the net price reaches the lowest allowed, allowing for document discounts and tax-inclusive prices.
+- A short toast appears only when the result changes, for example from OK to a problem, or back to OK.
+- "Check Discount Matrix" still opens a dialog with the same table.
+- When submit is blocked, the error shows a short title and the same table instead of a block of red text.
+- Enforcement is unchanged: submit is still checked on the server.
+
+## Version 0.12.2: customers with no Customer Group
+
+- Before: a customer with no Customer Group skipped every VDM check, including below cost and the margin floor ("Not Applicable").
+- Now: VDM checks them against the End Users / Retail column, the strictest one, so discount caps, margin floors and the below-cost block all apply.
+- The document summary shows the group as "(no Customer Group, checked as End Users / Retail)".
+- Intercompany pricing is unchanged: it only applies to the Intercompany group.
+
+
+## Version 0.13: discount exceptions approved by Finance Manager
+
+Discount exceptions are no longer approved by the Sales Manager.
+
+- New VDM Settings field **Discount Approver Role**, set to **Finance Manager** on upgrade. Users with this role approve discounts above the discount matrix (and, when *Below the Margin Floor* is Block, lines without a known cost).
+- **Sales Managers can no longer approve.** The Approve Discount Exception button no longer appears for them, and the server rejects their requests.
+- The **Margin Approver Role** (MD) is unchanged and can still approve everything the Discount Approver can, plus prices below the margin minimum.
+- Migration gives the Discount Approver Role **read access** to Quotation, Sales Order, Sales Invoice and VDM Approval, so Finance Managers can open the documents they approve. They do not need edit rights: approving changes no prices.
+- New approval records show Approval Level **Discount Approver**. Approvals recorded earlier as *Sales Manager* stay valid, including on drafts already approved and when carried forward to orders and invoices.
+- The *Allow Sales Manager Discount Exceptions* setting is renamed **Allow Discount Exceptions**; its value is unchanged.
+
+Upgrade: deploy, migrate, hard-refresh. Check VDM Settings shows Discount Approver Role = Finance Manager, and that the Finance Managers have that role in their User records. Staging: as a Sales Manager, confirm no Approve button on a draft that exceeds the discount matrix; as a Finance Manager, open the same draft, approve with a reason, and confirm it submits; confirm the order and invoice made from it inherit the approval.
+

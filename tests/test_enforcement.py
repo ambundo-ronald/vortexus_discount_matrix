@@ -55,7 +55,7 @@ class EnforcementTests(unittest.TestCase):
             return (mode, limits, None) if mode == 'Discount Matrix' else (mode, None, limits)
         settings.enforced_limits = enforced
         settings.control_options = lambda: dict(dict(block_below_cost=False, cost_basis='System cost (FIFO)',
-            cost_tolerance=5.0, approver_role='MD'), **getattr(self, 'controls', {}))
+            cost_tolerance=5.0, approver_role='MD', discount_role='Finance Manager'), **getattr(self, 'controls', {}))
         def calculate(doc):
             for row in doc.items:
                 row.net_rate = row.rate - (doc.get('discount_amount') or 0) / row.qty
@@ -244,6 +244,17 @@ class EnforcementTests(unittest.TestCase):
             doc.items[0].rate = 150
             with self.assertRaises(ValueError):
                 self.v.before_submit(doc)
+
+    def test_customer_without_group_is_checked_as_end_user(self):
+        for doctype in self.v.DOCTYPES:
+            doc = self.scenario(doctype)
+            self.frappe.db.get_value.side_effect = lambda dt, name, field: 'Ro Systems' if dt == 'Item' else None
+            with self.inspect_patches():
+                result = self.v.inspect(doc)
+                self.assertEqual(result['snapshot']['matrix_column'], 'End Users / Retail')
+                self.assertEqual(result['status'], 'Adjust Price')
+                with self.assertRaisesRegex(ValueError, 'Increase the selling price'):
+                    self.v.before_submit(doc)
 
     def test_lead_requires_group_for_mapped_items(self):
         doc = self.scenario('Quotation')

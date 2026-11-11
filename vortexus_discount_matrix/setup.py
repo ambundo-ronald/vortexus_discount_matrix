@@ -1,6 +1,6 @@
 import frappe
 from vortexus_discount_matrix.core import (MATRIX_COLUMNS, MATRIX_MODES, DISCOUNT_MODE, LIMIT_FIELDS, default_limit_rows, policy,
-    COST_BASES, SYSTEM_COST, DEFAULT_APPROVER_ROLE, DEFAULT_INTERCOMPANY_GROUP, DEFAULT_INTERCOMPANY_MARKUP,
+    COST_BASES, SYSTEM_COST, DEFAULT_APPROVER_ROLE, DEFAULT_DISCOUNT_ROLE, DEFAULT_INTERCOMPANY_GROUP, DEFAULT_INTERCOMPANY_MARKUP,
     MARGIN_FLOOR_ACTIONS, BLOCK_FLOOR)
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
@@ -37,7 +37,7 @@ def install():
             field('approved_by', 'Approved By', 'Link', options='User', reqd=1),
             field('approved_at', 'Approved At', 'Datetime', reqd=1),
             field('snapshot', 'Approved Terms', 'Long Text', reqd=1),
-            field('approval_level', 'Approval Level', 'Select', options='Sales Manager\nMargin Approver', read_only=1),
+            field('approval_level', 'Approval Level', 'Select', options=APPROVAL_LEVELS, read_only=1),
         ], permissions=[approval_perm('Sales Manager'), approval_perm('System Manager', delete=1),
                         approval_perm(DEFAULT_APPROVER_ROLE)]),
     }
@@ -52,9 +52,11 @@ def install():
     controls_added = not any(f.fieldname == 'block_below_cost' for f in settings_type.fields)
     intercompany_added = not any(f.fieldname == 'intercompany_pricing' for f in settings_type.fields)
     floor_action_added = not any(f.fieldname == 'margin_floor_action' for f in settings_type.fields)
+    discount_role_added = not any(f.fieldname == 'discount_approver_role' for f in settings_type.fields)
     for definition in [
-        field('allow_manager_approvals', 'Allow Sales Manager Discount Exceptions', 'Check', default='1',
-            description='When unchecked, direct and inherited exceptions cannot authorize submission. Existing approval records are retained.'),
+        field('allow_manager_approvals', ALLOW_LABEL, 'Check', default='1', description=ALLOW_DESCRIPTION),
+        field('discount_approver_role', 'Discount Approver Role', 'Link', options='Role', default=DEFAULT_DISCOUNT_ROLE,
+            description=DISCOUNT_ROLE_DESCRIPTION),
         field('customer_mappings', 'Customer Group to Matrix Group', 'Table', options='VDM Customer Mapping',
             description='Unmapped customer groups are outside this control. Each customer group may appear only once.'),
         field('mappings_initialized', 'Mappings Initialized', 'Check', hidden=1, read_only=1, default='0'),
@@ -81,11 +83,10 @@ def install():
             description='An approved exception stays valid while each line cost rises by no more than this percentage. '
                         'Costs move with every stock receipt; a larger rise needs a new approval.'),
         field('margin_approver_role', 'Margin Approver Role', 'Link', options='Role', default=DEFAULT_APPROVER_ROLE,
-            description='Approves prices below the margin minimum and lines without a known cost. '
-                        'Sales Managers approve discount-matrix exceptions only.'),
+            description=MARGIN_ROLE_DESCRIPTION),
         field('margin_floor_action', 'Below the Margin Floor', 'Select', options='\n'.join(MARGIN_FLOOR_ACTIONS), default=BLOCK_FLOOR,
             description='Block: a price below the margin floor cannot be submitted or approved by anyone, like a price below cost. '
-                        'Lines without a known cost then need a Sales Manager approval with a reason. '
+                        'Lines without a known cost then need a Discount Approver Role approval with a reason. '
                         'Approval by margin approver: the Margin Approver Role may approve with a reason.'),
         field('intercompany_pricing', 'Price Intercompany Sales at Cost Plus Markup', 'Check', default='1',
             description='Customers in the intercompany Customer Group are priced at system cost plus the markup on every draft save. '
@@ -103,7 +104,8 @@ def install():
     settings_type.save(ignore_permissions=True)
     frappe.clear_cache(doctype='VDM Settings')
     settings = frappe.get_doc('VDM Settings')
-    if approvals_added or mode_added or controls_added or intercompany_added or floor_action_added or not settings.get('matrix_mode'):
+    if (approvals_added or mode_added or controls_added or intercompany_added or floor_action_added
+            or discount_role_added or not settings.get('matrix_mode')):
         if approvals_added:
             settings.allow_manager_approvals = 1
         if not settings.get('matrix_mode'):
@@ -116,6 +118,9 @@ def install():
             settings.margin_approver_role = DEFAULT_APPROVER_ROLE
         if floor_action_added:
             settings.margin_floor_action = BLOCK_FLOOR
+        if discount_role_added:
+            # Policy (0.13): discount exceptions move from Sales Manager to Finance Manager.
+            settings.discount_approver_role = DEFAULT_DISCOUNT_ROLE
         if intercompany_added:
             settings.intercompany_pricing = 1
             if frappe.db.exists('Customer Group', DEFAULT_INTERCOMPANY_GROUP):
@@ -153,6 +158,7 @@ def install():
     install_transaction_fields()
     install_lead_fields()
     install_sidebar()
+    install_discount_approver_access()
 
 
 def approval_perm(role, delete=0):
@@ -174,8 +180,12 @@ def upgrade_doctypes():
     changed = False
     if not any(f.fieldname == 'approval_level' for f in approval.fields):
         approval.append('fields', field('approval_level', 'Approval Level', 'Select',
-                                        options='Sales Manager\nMargin Approver', read_only=1))
+                                        options=APPROVAL_LEVELS, read_only=1))
         changed = True
+    for df in approval.fields:
+        if df.fieldname == 'approval_level' and df.options != APPROVAL_LEVELS:
+            df.options = APPROVAL_LEVELS
+            changed = True
     if not any(p.role == DEFAULT_APPROVER_ROLE for p in approval.permissions):
         approval.append('permissions', approval_perm(DEFAULT_APPROVER_ROLE))
         changed = True
@@ -188,18 +198,55 @@ def upgrade_doctypes():
         simulation.save(ignore_permissions=True)
         frappe.clear_cache(doctype='VDM Price Simulation')
     settings_type = frappe.get_doc('DocType', 'VDM Settings')
+    # Labels and help text written by earlier versions; install() only adds missing fields.
+    wanted = {'matrix_mode': dict(options='\n'.join(MATRIX_MODES), description=MODE_DESCRIPTION),
+              'allow_manager_approvals': dict(label=ALLOW_LABEL, description=ALLOW_DESCRIPTION),
+              'margin_approver_role': dict(description=MARGIN_ROLE_DESCRIPTION)}
+    settings_changed = False
     for df in settings_type.fields:
-        if df.fieldname == 'matrix_mode' and df.options != '\n'.join(MATRIX_MODES):
-            df.options = '\n'.join(MATRIX_MODES)
-            df.description = MODE_DESCRIPTION
-            settings_type.save(ignore_permissions=True)
-            frappe.clear_cache(doctype='VDM Settings')
-            break
+        for prop, value in wanted.get(df.fieldname, {}).items():
+            if getattr(df, prop, None) != value:
+                setattr(df, prop, value)
+                settings_changed = True
+    if settings_changed:
+        settings_type.save(ignore_permissions=True)
+        frappe.clear_cache(doctype='VDM Settings')
+
+
+APPROVAL_LEVELS = 'Sales Manager\nDiscount Approver\nMargin Approver'
+ALLOW_LABEL = 'Allow Discount Exceptions'
+ALLOW_DESCRIPTION = ('When unchecked, direct and inherited exceptions cannot authorize submission. '
+                     'Existing approval records are retained.')
+DISCOUNT_ROLE_DESCRIPTION = ('Approves discounts above the discount matrix (and, with the margin floor blocked, '
+                             'lines without a known cost). Gets read access to Quotations, Sales Orders and '
+                             'Sales Invoices on migration so it can open them to approve. Sales Managers cannot approve.')
+MARGIN_ROLE_DESCRIPTION = ('Approves prices below the margin minimum and lines without a known cost, '
+                           'and everything the Discount Approver Role can approve.')
+
+
+def install_discount_approver_access():
+    """Read access for the discount approver role, so it can open the documents it approves."""
+    from frappe.permissions import add_permission
+    role = frappe.db.get_single_value('VDM Settings', 'discount_approver_role') or DEFAULT_DISCOUNT_ROLE
+    if not frappe.db.exists('Role', role):
+        print(f'VDM: Role {role} does not exist; create it and migrate again to give it read access.')
+        return []
+    added = []
+    for doctype in ('Quotation', 'Sales Order', 'Sales Invoice', 'VDM Approval'):
+        has_custom = frappe.db.exists('Custom DocPerm', {'parent': doctype})
+        table = 'Custom DocPerm' if has_custom else 'DocPerm'
+        if frappe.db.exists(table, {'parent': doctype, 'role': role, 'permlevel': 0, 'read': 1}):
+            continue
+        add_permission(doctype, role, 0, 'read')
+        added.append(doctype)
+    if added:
+        frappe.clear_cache()
+    return added
 
 
 MODE_DESCRIPTION = ('Discount Matrix: maximum discount from Standard Selling. '
                     'Margin Matrix: minimum gross margin, (net price - cost) / net price. '
-                    'Discount and Margin: both; a Sales Manager approves discount exceptions, '
+                    'Discount and Margin: both; the Discount Approver Role approves discount exceptions, '
                     'the Margin Approver Role approves prices below the margin minimum.')
 
 
@@ -323,7 +370,7 @@ def install_approval_view():
 
 def order_settings_fields(settings_type):
     # Put controls before the long mapping grid on upgraded sites as well.
-    order = ['enabled', 'allow_manager_approvals', 'matrix_mode', 'block_below_cost', 'cost_basis', 'cost_tolerance',
+    order = ['enabled', 'allow_manager_approvals', 'discount_approver_role', 'matrix_mode', 'block_below_cost', 'cost_basis', 'cost_tolerance',
              'margin_floor_action', 'margin_approver_role', 'intercompany_pricing', 'intercompany_customer_group', 'intercompany_markup', 'price_list',
              'customer_mappings', 'mappings_initialized', 'discount_limits', 'limits_initialized',
              'margin_limits', 'margins_initialized']

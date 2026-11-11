@@ -29,7 +29,7 @@ class TierTests(unittest.TestCase):
         self.assertEqual(result['required_level'], 'Sales Manager')
         line = result['lines'][0]
         self.assertEqual((line['minimum_net_rate'], line['margin_floor'], line['max_discount'], line['min_margin']), (320, 142.86, 36, 30))
-        self.assertIn('Sales Manager or MD', result['message'])
+        self.assertIn('Finance Manager or MD', result['message'])
         self.assertEqual(result['snapshot']['matrix_mode'], 'Discount and Margin')
 
     def test_margin_breach_needs_md(self):
@@ -82,16 +82,16 @@ class TierTests(unittest.TestCase):
         self.assertEqual(result['required_level'], 'Margin Approver')
         self.assertIn('no cost was found', doc.custom_vdm_summary)
 
-    def test_sales_manager_cannot_approve_margin_breach_but_md_can(self):
+    def test_discount_approver_cannot_approve_margin_breach_but_md_can(self):
         doc = self.scenario(rate=140)
         doc.docstatus, doc.check_permission = 0, lambda *a: None
         self.frappe.db.sql.return_value = []
         with self.both():
-            self.frappe.get_roles.return_value = ['Sales Manager']
+            self.frappe.get_roles.return_value = ['Finance Manager']
             with self.assertRaisesRegex(PermissionError, 'need approval by MD'):
                 self.v.approve('Sales Order', 'TEST-1', 'Volume deal')
             self.frappe.get_roles.return_value = ['MD']
-            doc.save = lambda: None
+            doc.save = lambda **kw: None
             doc.db_set = lambda *a, **k: None
             inserted = []
             real = self.frappe.get_doc.side_effect

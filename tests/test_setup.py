@@ -230,3 +230,51 @@ class QuotationGroupFieldTests(unittest.TestCase):
         self.assertTrue(all(c[:2] == ('Quotation', 'customer_group') and c[4] is False for c in calls))
         self.assertEqual(stored['hidden'], '0')
         self.assertIn('!= "Customer"', stored['depends_on'])
+
+
+class DiscountApproverAccessTests(unittest.TestCase):
+    def run_install(self, role='Finance Manager', role_exists=True, existing=()):
+        from unittest.mock import Mock
+        frappe = types.ModuleType('frappe')
+        frappe.db = Mock()
+        frappe.db.get_single_value = Mock(return_value=role)
+        granted = set(existing)
+        def exists(doctype, filters=None):
+            if doctype == 'Role':
+                return role_exists
+            if doctype == 'Custom DocPerm' and 'role' not in filters:
+                return True
+            return doctype == 'Custom DocPerm' and (filters['parent'], filters['role']) in granted
+        frappe.db.exists = Mock(side_effect=exists)
+        frappe.clear_cache = Mock()
+        perms = types.ModuleType('frappe.permissions')
+        calls = []
+        def add_permission(doctype, role, permlevel, ptype):
+            calls.append((doctype, role, permlevel, ptype))
+            granted.add((doctype, role))
+        perms.add_permission = add_permission
+        frappe.permissions = perms
+        custom = types.ModuleType('frappe.custom.doctype.custom_field.custom_field'); custom.create_custom_fields = Mock()
+        with patch.dict(sys.modules, {'frappe': frappe, 'frappe.permissions': perms, custom.__name__: custom}):
+            sys.modules.pop('vortexus_discount_matrix.setup', None)
+            setup = importlib.import_module('vortexus_discount_matrix.setup')
+            try:
+                first = setup.install_discount_approver_access()
+                second = setup.install_discount_approver_access()
+            finally:
+                sys.modules.pop('vortexus_discount_matrix.setup', None)
+        return first, second, calls
+
+    def test_finance_manager_gets_read_access_once(self):
+        first, second, calls = self.run_install()
+        self.assertEqual(first, ['Quotation', 'Sales Order', 'Sales Invoice', 'VDM Approval'])
+        self.assertEqual(second, [])
+        self.assertTrue(all(c[1:] == ('Finance Manager', 0, 'read') for c in calls))
+
+    def test_existing_access_is_left_alone(self):
+        first, _, _ = self.run_install(existing=[('Sales Invoice', 'Finance Manager')])
+        self.assertNotIn('Sales Invoice', first)
+
+    def test_missing_role_is_reported_not_created(self):
+        first, _, calls = self.run_install(role_exists=False)
+        self.assertEqual((first, calls), ([], []))

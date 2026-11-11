@@ -32,6 +32,8 @@ jobs:
         run: node tests/test_approval_switch.js
       - name: Price simulation form tests
         run: node tests/test_simulation_view.js
+      - name: Problem panel tests
+        run: node tests/test_panel.js
       - name: Combined script loading tests
         run: node tests/test_script_boundaries.js
       - name: Build package

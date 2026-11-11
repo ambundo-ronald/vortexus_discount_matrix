@@ -11,10 +11,10 @@ class ApprovalTests(unittest.TestCase):
         frappe = types.ModuleType('frappe')
         frappe.whitelist = lambda: lambda f: f
         frappe.PermissionError = PermissionError
-        def throw(message, kind=ValueError):
+        def throw(message, kind=ValueError, title=None):
             raise kind(message)
         frappe.throw = throw
-        frappe.get_roles = Mock(return_value=['Sales Manager'])
+        frappe.get_roles = Mock(return_value=['Finance Manager'])
         frappe.db = Mock()
         frappe.db.get_single_value.return_value = True
         frappe.session = types.SimpleNamespace(user='manager@example.test')
@@ -68,13 +68,14 @@ class ApprovalTests(unittest.TestCase):
         self.frappe.get_doc.side_effect = [doc, doc, approval]
         with patch.object(self.v, 'inspect', return_value={'violations': [{'row': 1, 'item_code': 'ITEM', 'max_discount': 30, 'minimum_net_rate': 350, 'actual_net_rate': 150}], 'fingerprint': 'terms', 'snapshot': {'price': 55}}):
             self.v.approve('Sales Order', 'SO-1', '  Contract exception  ')
-        doc.check_permission.assert_called_once_with('write')
+        doc.check_permission.assert_called_once_with('read')  # approver need not be able to edit
         payload = self.frappe.get_doc.call_args_list[2].args[0]
         self.assertEqual(payload['reason'], 'Contract exception')
         self.assertEqual(payload['approved_by'], 'manager@example.test')
         self.assertEqual(payload['fingerprint'], 'terms')
+        self.assertEqual(payload['approval_level'], 'Discount Approver')
         approval.insert.assert_called_once_with(ignore_permissions=True)
-        doc.save.assert_called_once()
+        doc.save.assert_called_once_with(ignore_permissions=True)
 
     def test_submitted_document_cannot_receive_approval(self):
         self.frappe.get_doc.return_value = Mock(docstatus=1)
@@ -121,3 +122,21 @@ class ApprovalTests(unittest.TestCase):
         self.assertTrue(self.v.approval_options()['allow_approval'])
         self.frappe.db.get_single_value.side_effect = lambda dt, field: field == 'enabled'
         self.assertFalse(self.v.approval_options()['allow_approval'])
+
+    def test_sales_manager_can_no_longer_approve(self):
+        self.frappe.get_roles.return_value = ['Sales Manager', 'Sales User']
+        self.assertFalse(self.v.approval_options()['allow_approval'])
+        with self.assertRaisesRegex(PermissionError, 'Only Finance Manager or MD'):
+            self.v.approve('Sales Order', 'SO-1', 'Exception')
+        self.frappe.get_doc.assert_not_called()
+
+    def test_discount_approver_role_is_configurable(self):
+        values = {'enabled': 1, 'allow_manager_approvals': 1, 'discount_approver_role': 'Accounts Manager'}
+        self.frappe.db.get_single_value.side_effect = lambda dt, field: values.get(field)
+        self.frappe.get_roles.return_value = ['Finance Manager']
+        self.assertFalse(self.v.approval_options()['allow_approval'])
+        self.frappe.get_roles.return_value = ['Accounts Manager']
+        self.assertTrue(self.v.approval_options()['allow_approval'])
+        self.frappe.get_roles.return_value = ['MD']
+        self.assertTrue(self.v.approval_options()['allow_approval'])
+

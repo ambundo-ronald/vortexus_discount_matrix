@@ -2,7 +2,7 @@ import frappe
 from frappe.utils import flt
 from vortexus_discount_matrix.core import (mapping_from_rows, limits_from_rows,
     DISCOUNT_MODE, MARGIN_MODE, BOTH_MODE, MATRIX_MODES, SYSTEM_COST, COST_BASES, DEFAULT_APPROVER_ROLE,
-    MARGIN_FLOOR_ACTIONS, BLOCK_FLOOR)
+    MARGIN_FLOOR_ACTIONS, BLOCK_FLOOR, DEFAULT_DISCOUNT_ROLE)
 
 
 def validate(doc, method=None):
@@ -78,6 +78,7 @@ def control_options():
     basis = value('cost_basis')
     tolerance = value('cost_tolerance')
     role = value('margin_approver_role')
+    discount_role = value('discount_approver_role')
     action = value('margin_floor_action')
     return dict(
         margin_floor_action=action if action in MARGIN_FLOOR_ACTIONS else BLOCK_FLOOR,
@@ -85,4 +86,5 @@ def control_options():
         cost_basis=basis if basis in COST_BASES else SYSTEM_COST,
         cost_tolerance=flt(tolerance) if isinstance(tolerance, (int, float, str)) and not isinstance(tolerance, bool) else 5.0,
         approver_role=role if isinstance(role, str) and role else DEFAULT_APPROVER_ROLE,
+        discount_role=discount_role if isinstance(discount_role, str) and discount_role else DEFAULT_DISCOUNT_ROLE,
     )

@@ -4,7 +4,7 @@ from frappe.utils import flt
 from erpnext.controllers.taxes_and_totals import calculate_taxes_and_totals
 from vortexus_discount_matrix.core import (limit, minimum_price, effective_discount, margin_minimum_price,
     gross_margin, terms_fingerprint, changed_term_paths, DISCOUNT_MODE, MARGIN_MODE, BOTH_MODE,
-    SALES_MANAGER, MARGIN_APPROVER, BELOW_COST, BELOW_FLOOR, BLOCK_FLOOR, LEVEL_RANK, required_level, covers, cost_within_tolerance)
+    SALES_MANAGER, DISCOUNT_APPROVER, DEFAULT_DISCOUNT_ROLE, MARGIN_APPROVER, BELOW_COST, BELOW_FLOOR, BLOCK_FLOOR, LEVEL_RANK, required_level, covers, cost_within_tolerance)
 from vortexus_discount_matrix.prices import reference_rate, cost_rate
 
 DOCTYPES = ('Quotation', 'Sales Order', 'Sales Invoice')
@@ -24,15 +24,17 @@ def options():
 
 
 def user_level(opts):
-    """Highest approval level the current user holds: the margin approver role (MD) or Sales Manager."""
+    """Highest approval level the current user holds: the margin approver role (MD) or the
+    discount approver role (Finance Manager). Sales Managers no longer approve."""
     roles = set(frappe.get_roles())
     if opts['approver_role'] in roles:
         return MARGIN_APPROVER
-    return SALES_MANAGER if 'Sales Manager' in roles else None
+    return DISCOUNT_APPROVER if (opts.get('discount_role') or DEFAULT_DISCOUNT_ROLE) in roles else None
 
 
 def level_label(level, opts):
-    return {SALES_MANAGER: f"a Sales Manager or {opts['approver_role']}", MARGIN_APPROVER: opts['approver_role'],
+    discount = f"{opts.get('discount_role') or DEFAULT_DISCOUNT_ROLE} or {opts['approver_role']}"
+    return {SALES_MANAGER: discount, DISCOUNT_APPROVER: discount, MARGIN_APPROVER: opts['approver_role'],
             BELOW_COST: 'nobody: below-cost sales are blocked',
             BELOW_FLOOR: 'nobody: sales below the margin floor are blocked'}.get(level, '')
 
@@ -42,6 +44,10 @@ def approval_options():
     opts = options()
     return {'allow_approval': bool(enabled() and approvals_allowed() and user_level(opts)),
             'approver_role': opts['approver_role']}
+
+
+BLANK_GROUP = '(no Customer Group, checked as End Users / Retail)'
+BLANK_GROUP_COLUMN = 'End Users / Retail'
 
 
 def customer_group(doc):
@@ -94,6 +100,11 @@ def inspect(doc):
         return result
     group = customer_group(doc)
     mappings = customer_mappings()
+    if not group:
+        # A customer with no Customer Group is checked as End Users / Retail, the strictest column,
+        # so cost, margin and discount limits still apply.
+        group = BLANK_GROUP
+        mappings = dict(mappings, **{BLANK_GROUP: BLANK_GROUP_COLUMN})
     applicable = []
     for r in doc.items:
         item_group = actual_groups[r.idx]
@@ -341,21 +352,65 @@ def validate(doc, method=None):
         doc.custom_vdm_summary = intercompany or 'Discount Matrix enforcement is disabled in VDM Settings. Prices are not being blocked.'
         return
     result = inspect(doc)
+    doc._vdm_result = result
     doc.custom_vdm_status = result['status']
     doc.custom_vdm_summary = summary(result) or result.get('message', '')
     if intercompany:
         doc.custom_vdm_summary = intercompany + ' ' + doc.custom_vdm_summary
 
 
+def lowest_allowed(line):
+    parts = [line.get('minimum_net_rate'), line.get('margin_floor'), line.get('cost_rate') if line.get('below_cost') else None]
+    parts = [float(v) for v in parts if v not in (None, '')]
+    return max(parts) if parts else None
+
+
+def problem_reason(line):
+    if line.get('below_cost'):
+        return 'Below cost'
+    if line.get('below_floor'):
+        return f"Below {line['min_margin']:g}% margin floor"
+    if line.get('min_margin') is not None and line.get('cost_rate') is None:
+        return 'No cost found'
+    if line.get('level') == SALES_MANAGER and line.get('max_discount') is not None:
+        return f"Discount above {line['max_discount']:g}%"
+    if line.get('min_margin') is not None:
+        return f"Margin below {line['min_margin']:g}%"
+    return ''
+
+
+def problem_html(intro, lines, notes=()):
+    """A short message and a table of the problem lines, for the submit error dialog."""
+    from html import escape as escape_html
+    money = lambda v: '' if v is None else f'{float(v):,.2f}'
+    rows = ''.join(
+        f"<tr><td>{escape_html(str(l.get('row')))}</td><td>{escape_html(str(l.get('item_code') or ''))}</td>"
+        f"<td style='text-align:right'>{money(l.get('actual_net_rate'))}</td>"
+        f"<td style='text-align:right'><b>{money(lowest_allowed(l))}</b></td><td>{escape_html(problem_reason(l))}</td></tr>"
+        for l in lines)
+    table = ("<table class='table table-bordered table-sm' style='margin-top:8px'><thead><tr><th>Row</th><th>Item</th>"
+             "<th style='text-align:right'>Your net price</th><th style='text-align:right'>Lowest allowed</th><th>Issue</th></tr></thead>"
+             f"<tbody>{rows}</tbody></table>") if rows else ''
+    extra = ''.join(f"<p class='text-muted'>{escape_html(str(n))}</p>" for n in notes if n)
+    return f'<p>{escape_html(intro)}</p>{table}{extra}'
+
+
+SUBMIT_BLOCKS = {
+    'Below Cost': ('Blocked: below cost', 'Selling below cost is not allowed. Increase the selling price to at least the lowest allowed.'),
+    'Below Margin Floor': ('Blocked: below margin floor', 'These prices are below the minimum margin for their item group. Increase the selling price to at least the lowest allowed.'),
+    'Adjust Price': ('Price needs adjusting', 'These prices are below the Discount Matrix minimum. Increase the selling price or reduce the discount, or ask for an approved exception.'),
+    'Pending Approval': ('Waiting for approval', 'These prices need an approved exception before you can submit. Increase the selling price or ask for approval.'),
+}
+
+
 def before_submit(doc, method=None):
     validate(doc)
-    if doc.custom_vdm_status == 'Below Cost':
-        frappe.throw('A price is below cost. Selling below cost is blocked. Increase the selling price before submitting.\n' + doc.custom_vdm_summary)
-    if doc.custom_vdm_status == 'Below Margin Floor':
-        frappe.throw('A price is below the margin floor for its item group. Sales below the margin floor are blocked. '
-                     'Increase the selling price before submitting.\n' + doc.custom_vdm_summary)
-    if doc.custom_vdm_status in ('Adjust Price', 'Pending Approval'):
-        frappe.throw('Price is below the permitted matrix minimum. Increase the selling price or reduce the discount before submitting.\n' + doc.custom_vdm_summary)
+    block = SUBMIT_BLOCKS.get(doc.custom_vdm_status)
+    if block:
+        result = getattr(doc, '_vdm_result', None) or {}
+        lines = result.get('violations') or []
+        notes = list(result.get('inheritance_notes') or []) + ([result['approval_mismatch']] if result.get('approval_mismatch') else [])
+        frappe.throw(problem_html(block[1], lines, notes) if lines else block[1] + '\n' + (doc.custom_vdm_summary or ''), title=block[0])
 
 
 def on_submit(doc, method=None):
@@ -387,18 +442,19 @@ def approve(doctype, name, reason):
     if doctype not in DOCTYPES or not enabled():
         frappe.throw('Discount Matrix is not enabled for this document.')
     if not approvals_allowed():
-        frappe.throw('Sales Manager discount exceptions are disabled in VDM Settings.')
+        frappe.throw('Discount exceptions are disabled in VDM Settings.')
     opts = options()
     level = user_level(opts)
     if not level:
-        frappe.throw(f"Only a Sales Manager or {opts['approver_role']} can approve a discount exception.", frappe.PermissionError)
+        frappe.throw(f"Only {level_label(SALES_MANAGER, opts)} can approve a discount exception.", frappe.PermissionError)
     reason = (reason or '').strip()
     if not reason:
         frappe.throw('Enter the reason for approving this discount.')
     # Serialize approval against concurrent saves and approve only persisted terms.
     frappe.db.sql(f'SELECT name FROM `tab{doctype}` WHERE name=%s FOR UPDATE', (name,))
     doc = frappe.get_doc(doctype, name)
-    doc.check_permission('write')
+    # The approver needs to see the document, not edit it: approving changes no prices.
+    doc.check_permission('read')
     if doc.docstatus != 0:
         frappe.throw('Only saved drafts can receive discount approval.')
     result = inspect(doc)
@@ -411,8 +467,9 @@ def approve(doctype, name, reason):
     if not covers(level, result.get('required_level')):
         frappe.throw(f"These prices are below the margin minimum and need approval by {opts['approver_role']}.",
                      frappe.PermissionError)
-    # Persist controller recalculations before recording the terms approved.
-    doc.save()
+    # Persist controller recalculations before recording the terms approved. Nothing the
+    # approver typed is saved, so this runs with system permission once the role is confirmed.
+    doc.save(ignore_permissions=True)
     result = inspect(frappe.get_doc(doctype, name))
     approval = frappe.get_doc(dict(doctype='VDM Approval', reference_doctype=doctype, reference_name=name,
         fingerprint=result['fingerprint'], reason=reason, approved_by=frappe.session.user, approval_level=level,

@@ -25,7 +25,7 @@ const assert = require('node:assert/strict');
     await handlers['Sales Order'].refresh(frm);
     await buttons['Check Discount Matrix']();
     assert.equal(dialogs.length, 1, status + ' must produce a visible dialog');
-    assert.ok(dialogs[0].message.includes(status));
+    assert.ok(dialogs[0].message.includes('Visible result') && dialogs[0].message.includes('indicator-pill'), status + ' dialog shows the result');
     assert.equal(buttons['Approve Discount Exception'], undefined);
   }
   console.log('Button checks passed for all seven outcomes.');

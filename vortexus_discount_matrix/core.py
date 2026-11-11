@@ -76,12 +76,17 @@ MATRIX_MODES = (DISCOUNT_MODE, MARGIN_MODE, BOTH_MODE)
 SALES_MANAGER, MARGIN_APPROVER, BELOW_COST = 'Sales Manager', 'Margin Approver', 'Below Cost'
 # Below the margin floor when VDM Settings blocks it: like below cost, nobody can approve.
 BELOW_FLOOR = 'Below Margin Floor'
-LEVEL_RANK = {None: 0, SALES_MANAGER: 1, MARGIN_APPROVER: 2, BELOW_FLOOR: 3, BELOW_COST: 3}
+# Discount-level lines keep the internal level SALES_MANAGER (it is part of saved snapshots).
+# Approvals given by the Discount Approver Role (default Finance Manager) record DISCOUNT_APPROVER;
+# approvals recorded before 0.13 say Sales Manager. Both rank the same.
+DISCOUNT_APPROVER = 'Discount Approver'
+LEVEL_RANK = {None: 0, SALES_MANAGER: 1, DISCOUNT_APPROVER: 1, MARGIN_APPROVER: 2, BELOW_FLOOR: 3, BELOW_COST: 3}
 BLOCK_FLOOR, APPROVE_FLOOR = 'Block', 'Approval by margin approver'
 MARGIN_FLOOR_ACTIONS = (BLOCK_FLOOR, APPROVE_FLOOR)
 SYSTEM_COST, HIGHER_COST = 'System cost (FIFO)', 'Higher of system cost and last purchase rate'
 COST_BASES = (SYSTEM_COST, HIGHER_COST)
 DEFAULT_APPROVER_ROLE = 'MD'
+DEFAULT_DISCOUNT_ROLE = 'Finance Manager'
 DEFAULT_INTERCOMPANY_GROUP, DEFAULT_INTERCOMPANY_MARKUP = 'Intercompany', 10
 
 
