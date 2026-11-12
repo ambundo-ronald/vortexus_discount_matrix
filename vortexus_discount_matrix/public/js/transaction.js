@@ -54,7 +54,7 @@
     let html = `<div class="vdm-panel"><span class="indicator-pill ${COLORS[status] || 'gray'}">${escape(LABELS[status] || status)}</span>`
       + ` <span>${escape(result.message)}</span>`;
     if (problems.length) html += problemsTable(problems, withFix);
-    if (problems.length && isBlocked(status)) html += `<div class="small text-muted" style="margin-top:4px">${__('Blocked prices cannot be approved. Raise the price to at least the lowest allowed.')}</div>`;
+    if (problems.length && isBlocked(status)) html += `<div class="small text-muted" style="margin-top:4px">${__('Raise the price to at least the lowest allowed.')}</div>`;
     return html + excludedNote(result) + '</div>';
   }
 
@@ -68,8 +68,25 @@
     }
   }
 
+  // Show "Approve Discount Exception" only to a user who can approve these prices: a Finance Manager
+  // does not see it on prices only MD can approve, and nobody sees it when nothing needs approval.
+  function syncApproveButton(frm, result) {
+    if (!frm.remove_custom_button || !frm.add_custom_button) return;
+    frm.remove_custom_button(__('Approve Discount Exception'));
+    if (!frm._vdm_approver || !result.can_approve || frm.is_new() || frm.doc.docstatus !== 0) return;
+    frm.add_custom_button(__('Approve Discount Exception'), () => {
+      if (frm.is_dirty()) return frappe.msgprint(__('Save your changes before approving.'));
+      frappe.prompt([{fieldname: 'reason', fieldtype: 'Small Text', label: __('Approval reason'), reqd: 1}], async values => {
+        await frappe.call({method: method + 'approve', args: {doctype: frm.doc.doctype, name: frm.doc.name, reason: values.reason}, freeze: true});
+        await frm.reload_doc();
+        await runCheck(frm, false, true);
+      }, __('Approve Discount Exception'), __('Approve'));
+    });
+  }
+
   function render(frm, result, showDialog) {
     frm._vdm_result = result;
+    syncApproveButton(frm, result);
     frm.dashboard.set_headline_alert(panel(result, frm.doc.docstatus === 0), COLORS[result.status] === 'gray' ? 'orange' : (COLORS[result.status] || 'orange'));
     highlightRows(frm, result.violations || []);
     if (showDialog) frappe.msgprint({title: __('Discount Matrix Check'), message: panel(result, false), indicator: COLORS[result.status] || 'orange'});
@@ -141,7 +158,9 @@
           return runCheck(frm, true);
         });
         frm.remove_custom_button(__('Approve Discount Exception'));
+        frm._vdm_approver = false;
         // The server decides who may approve: the Discount Approver Role (Finance Manager) or the margin approver role (MD) set in VDM Settings.
+        // The button itself appears only once a check shows this user can approve this document's prices.
         if (!frm.is_new() && frm.doc.docstatus === 0 && !(dt === 'Sales Invoice' && frm.doc.is_return)) {
           let options;
           try {
@@ -151,16 +170,7 @@
             console.error('Discount approval settings could not be loaded', error);
             return;
           }
-          if (options.message?.allow_approval) {
-          frm.add_custom_button(__('Approve Discount Exception'), () => {
-            if (frm.is_dirty()) return frappe.msgprint(__('Save your changes before approving.'));
-            frappe.prompt([{fieldname: 'reason', fieldtype: 'Small Text', label: __('Approval reason'), reqd: 1}], async values => {
-              await frappe.call({method: method + 'approve', args: {doctype: dt, name: frm.doc.name, reason: values.reason}, freeze: true});
-              await frm.reload_doc();
-              await runCheck(frm, false, true);
-            }, __('Approve Discount Exception'), __('Approve'));
-          });
-          }
+          frm._vdm_approver = Boolean(options.message?.allow_approval);
         }
         // Drafts with items: one quiet check fills the panel. No dialog.
         if (frm.doc.docstatus === 0 && (frm.doc.items || []).some(r => r.item_code)) {

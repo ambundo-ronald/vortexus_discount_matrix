@@ -411,3 +411,18 @@ Discount exceptions are no longer approved by the Sales Manager.
 
 Upgrade: deploy, migrate, hard-refresh. Check VDM Settings shows Discount Approver Role = Finance Manager, and that the Finance Managers have that role in their User records. Staging: as a Sales Manager, confirm no Approve button on a draft that exceeds the discount matrix; as a Finance Manager, open the same draft, approve with a reason, and confirm it submits; confirm the order and invoice made from it inherit the approval.
 
+
+## Version 0.14: MD approves below the margin floor and below cost
+
+The MD (the **Margin Approver Role**) can now approve, with a reason, prices below the margin floor and prices below cost. Nobody else can.
+
+- New VDM Settings field **Below Cost**: `Block` or `Approval by margin approver`. It applies when **Check Sales Below Cost** (formerly *Block Sales Below Cost*) is ticked.
+- On upgrade, **Below Cost** and **Below the Margin Floor** are both set to `Approval by margin approver`, once. Later changes in VDM Settings are kept.
+- **The sales team still sees a red block.** A line below cost or below the margin floor shows **Blocked: below cost** or **Blocked: below margin floor** with "Increase the selling price" and the "Use lowest" button, exactly as before. Nothing on the form says it can be approved. When the salesperson asks, the MD opens the document and uses **Approve Discount Exception** with a reason; the document then shows Exception approved and can be submitted.
+- **The Approve Discount Exception button appears only to someone who can approve the current prices:** MD on these lines; Finance Manager or MD on ordinary discount exceptions; nobody when nothing needs approval or the setting is Block. A Finance Manager no longer sees the button on a document only MD can approve.
+- Only the Margin Approver Role can approve it, and the reason is required. Finance Manager (discount approver) and Sales Manager cannot. An approval recorded at Finance Manager level does not cover these lines.
+- Approved documents carry the approval to the orders and invoices made from them, as long as the price is not lower than what MD approved.
+- Choosing `Block` for either setting restores the hard block: nobody, including MD, can approve.
+
+Upgrade: deploy, migrate, hard-refresh. Check VDM Settings: Below Cost and Below the Margin Floor both say Approval by margin approver, and Margin Approver Role is MD. Staging: as a salesperson, price a line below cost; confirm the red block with no mention of approval; as a Finance Manager confirm approval is refused; as MD approve with a reason and submit; repeat below the margin floor.
+

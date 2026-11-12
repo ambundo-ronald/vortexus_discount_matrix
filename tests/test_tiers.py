@@ -38,8 +38,11 @@ class TierTests(unittest.TestCase):
             result = self.v.inspect(doc)
             self.v.validate(doc)
         self.assertEqual(result['required_level'], 'Margin Approver')
-        self.assertIn('approval by MD', result['message'])
-        self.assertIn('Needs approval by MD', doc.custom_vdm_summary)
+        # Sales see a red block; nothing tells them MD can approve.
+        self.assertEqual(result['status'], 'Below Margin Floor')
+        self.assertNotIn('MD', result['message'])
+        self.assertIn('BELOW MARGIN FLOOR 142.86: blocked.', doc.custom_vdm_summary)
+        self.assertNotIn('MD', doc.custom_vdm_summary)
 
     def test_below_cost_is_blocked_and_cannot_be_approved(self):
         doc = self.scenario(rate=90)
@@ -70,7 +73,7 @@ class TierTests(unittest.TestCase):
         doc = self.scenario(rate=90)
         with self.both(block=False):
             result = self.v.inspect(doc)
-        self.assertEqual(result['status'], 'Adjust Price')
+        self.assertEqual(result['status'], 'Below Margin Floor')  # below cost not checked; still below the floor
         self.assertEqual(result['required_level'], 'Margin Approver')
 
     def test_unknown_cost_with_margin_rule_needs_md_but_does_not_block_saving(self):
@@ -118,7 +121,7 @@ class TierTests(unittest.TestCase):
             self.assertEqual(self.v.inspect(doc)['status'], 'Approved Exception')
         with self.both(cost=106):
             result = self.v.inspect(doc)
-        self.assertEqual(result['status'], 'Adjust Price')
+        self.assertEqual(result['status'], 'Below Margin Floor')
         self.assertIn('Cost rose more than 5%', result['approval_mismatch'])
 
     def test_cost_fall_keeps_approval(self):
@@ -132,7 +135,7 @@ class TierTests(unittest.TestCase):
         self.approved(doc, level='Sales Manager')
         with self.both():
             result = self.v.inspect(doc)
-        self.assertEqual(result['status'], 'Adjust Price')
+        self.assertEqual(result['status'], 'Below Margin Floor')
         self.assertIn('now need MD', result['approval_mismatch'])
 
     def test_price_change_still_needs_new_approval(self):
@@ -140,7 +143,7 @@ class TierTests(unittest.TestCase):
         self.approved(doc)
         doc.items[0].rate = 135
         with self.both():
-            self.assertEqual(self.v.inspect(doc)['status'], 'Adjust Price')
+            self.assertEqual(self.v.inspect(doc)['status'], 'Below Margin Floor')
 
     def test_existing_discount_approvals_survive_turning_on_the_cost_block(self):
         doc = self.scenario(rate=150)

@@ -354,13 +354,15 @@ class EnforcementTests(unittest.TestCase):
             doc = self.scenario(doctype, rate=200)
             with self.margin_patches():
                 result = self.v.inspect(doc)
-                self.assertEqual(result['status'], 'Adjust Price')
+                self.assertEqual(result['status'], 'Below Margin Floor')  # shown to sales as a red block
+                self.assertEqual(result['required_level'], 'Margin Approver')  # MD can still approve
                 line = result['lines'][0]
                 self.assertEqual(line['min_margin'], 55)
                 self.assertEqual(line['minimum_net_rate'], 222.23)  # 100 / 0.45 rounded up
                 self.assertEqual(line['actual_margin'], 50)
                 self.assertEqual(line['cost_source'], 'Warehouse Valuation Rate')
-                self.assertIn('Margin is below', result['message'])
+                self.assertIn('below the minimum margin', result['message'])
+                self.assertNotIn('approv', result['message'].lower())
                 self.assertEqual(result['snapshot']['matrix_mode'], 'Margin Matrix')
                 self.v.validate(doc)
                 self.assertIn('minimum margin 55%', doc.custom_vdm_summary)
@@ -378,13 +380,13 @@ class EnforcementTests(unittest.TestCase):
         doc = self.scenario(rate=250)
         doc.discount_amount = 40  # net 210 < 222.23
         with self.margin_patches():
-            self.assertEqual(self.v.inspect(doc)['status'], 'Adjust Price')
+            self.assertEqual(self.v.inspect(doc)['status'], 'Below Margin Floor')
 
     def test_margin_mode_free_row_is_a_violation(self):
         doc = self.scenario(rate=0)
         with self.margin_patches():
             result = self.v.inspect(doc)
-        self.assertEqual(result['status'], 'Adjust Price')
+        self.assertEqual(result['status'], 'Below Margin Floor')
         self.assertIsNone(result['lines'][0]['actual_margin'])
 
     def test_margin_mode_uses_margin_table_scope(self):

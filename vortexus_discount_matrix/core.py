@@ -83,6 +83,8 @@ DISCOUNT_APPROVER = 'Discount Approver'
 LEVEL_RANK = {None: 0, SALES_MANAGER: 1, DISCOUNT_APPROVER: 1, MARGIN_APPROVER: 2, BELOW_FLOOR: 3, BELOW_COST: 3}
 BLOCK_FLOOR, APPROVE_FLOOR = 'Block', 'Approval by margin approver'
 MARGIN_FLOOR_ACTIONS = (BLOCK_FLOOR, APPROVE_FLOOR)
+# Below cost uses the same two choices: blocked for everyone, or the margin approver (MD) may approve.
+BELOW_COST_ACTIONS = MARGIN_FLOOR_ACTIONS
 SYSTEM_COST, HIGHER_COST = 'System cost (FIFO)', 'Higher of system cost and last purchase rate'
 COST_BASES = (SYSTEM_COST, HIGHER_COST)
 DEFAULT_APPROVER_ROLE = 'MD'
@@ -181,7 +183,7 @@ def mapping_from_rows(rows):
 NUMERIC_TERMS = set('row qty conversion_factor rate net_rate net_amount discount_percentage discount_amount additional_discount_percentage conversion_rate reference_price reference_net_rate max_discount minimum_net_rate actual_net_rate effective_discount tax_amount included_in_print_rate row_id cost_rate min_margin actual_margin margin_floor'.split())
 # Cost moves with every stock receipt. Approved terms are the prices, quantities and
 # limits; cost is checked separately against a tolerance (cost_within_tolerance).
-COST_TERMS = ('cost_rate', 'cost_source', 'actual_margin', 'margin_floor', 'below_cost', 'level', 'description')
+COST_TERMS = ('cost_rate', 'cost_source', 'actual_margin', 'margin_floor', 'below_cost', 'below_floor', 'level', 'description')
 
 
 def approval_terms(snapshot):

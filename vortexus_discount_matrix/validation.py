@@ -139,21 +139,19 @@ def inspect(doc):
     result['fingerprint'] = terms_fingerprint(snapshot)
     needed = result['required_level'] = required_level(result['violations'])
     if needed == BELOW_COST:
-        result['status'] = 'Below Cost'
-        result['message'] = ('A price is below cost. Selling below cost is blocked and cannot be approved. '
-                             'Increase the selling price.')
+        result['status'], result['message'] = 'Below Cost', BLOCKED_MESSAGES['Below Cost']
         return result
     if needed == BELOW_FLOOR:
-        result['status'] = 'Below Margin Floor'
-        result['message'] = ('A price is below the minimum margin for its item group. Sales below the margin floor are '
-                             'blocked and cannot be approved. Increase the selling price.')
+        result['status'], result['message'] = 'Below Margin Floor', BLOCKED_MESSAGES['Below Margin Floor']
         return result
     result['status'] = 'Adjust Price' if result['violations'] else 'Within Limit'
     if result['violations']:
         margin_breach = needed == MARGIN_APPROVER
-        result['message'] = (('Margin is below the permitted minimum. Increase the selling price or reduce the discount.' if margin_breach
-            else 'Discount exceeds the permitted limit. Increase the selling price or reduce the discount.')
-            + f' An exception needs approval by {level_label(needed, opts)}.')
+        if margin_breach:
+            lead = 'Margin is below the permitted minimum. Increase the selling price or reduce the discount.'
+        else:
+            lead = 'Discount exceeds the permitted limit. Increase the selling price or reduce the discount.'
+        result['message'] = lead + f' An exception needs approval by {level_label(needed, opts)}.'
     else:
         result['message'] = f"All {len(result['lines'])} checked item lines are within their limits."
     exceptions_enabled = approvals_allowed()
@@ -180,7 +178,29 @@ def inspect(doc):
             result['status'] = 'Inherited Exception'
             references = sorted({v['source_doctype'] + ' ' + v['source_name'] for v in inherited.values()})
             result['message'] = 'Approved exception carried forward from ' + ', '.join(references) + '. No additional approval is required.'
+    present_as_blocked(result)
     return result
+
+
+BLOCKED_MESSAGES = {
+    'Below Cost': 'A price is below cost. Selling below cost is blocked. Increase the selling price.',
+    'Below Margin Floor': ('A price is below the minimum margin for its item group. Sales below the margin floor '
+                           'are blocked. Increase the selling price.'),
+}
+
+
+def present_as_blocked(result):
+    """An unapproved line below cost or below the margin floor is shown to the sales team as a red
+    block, the same as when VDM Settings blocks it outright, and nothing says it can be approved.
+    The required level stays with the margin approver (MD), who can still approve it on request."""
+    if result.get('status') != 'Adjust Price':
+        return
+    remaining = result.get('violations') or []
+    status = ('Below Cost' if any(v.get('below_cost') for v in remaining)
+              else 'Below Margin Floor' if any(v.get('below_floor') for v in remaining) else None)
+    if status:
+        result['status'] = status
+        result['message'] = ' '.join([BLOCKED_MESSAGES[status]] + list(result.get('inheritance_notes') or []))
 
 
 def check_lines(doc, applicable, actual_groups, discount_lines, need_cost, opts, result):
@@ -215,14 +235,15 @@ def check_lines(doc, applicable, actual_groups, discount_lines, need_cost, opts,
                 if cap is None:
                     line['minimum_net_rate'] = floor
                 if net < floor:
-                    if block_floor:
-                        line['below_floor'] = True
-                        level = BELOW_FLOOR
-                    else:
-                        level = MARGIN_APPROVER
+                    line['below_floor'] = True
+                    # Block: nobody may approve. Otherwise only the margin approver (MD), with a reason.
+                    level = BELOW_FLOOR if block_floor else MARGIN_APPROVER
         if opts['block_below_cost'] and cost is not None and net < flt(cost, precision):
             line['below_cost'] = True
-            level = BELOW_COST
+            if opts.get('below_cost_action', BLOCK_FLOOR) == BLOCK_FLOOR:
+                level = BELOW_COST
+            elif LEVEL_RANK.get(level, 0) < LEVEL_RANK[MARGIN_APPROVER]:
+                level = MARGIN_APPROVER  # only the margin approver (MD), with a reason
         line['level'] = level
         line['description'] = describe(line, opts)
         result['lines'].append(line)
@@ -308,6 +329,7 @@ def matching_approval(doc, result, opts=None):
 
 def describe(r, opts=None):
     opts = opts or {'approver_role': 'MD'}
+    # Below cost and below the margin floor always read as blocked to the sales team.
     if r.get('below_cost'):
         tail = f" BELOW COST {r['cost_rate']:g}: blocked."
     elif r.get('below_floor'):
@@ -434,7 +456,21 @@ def preview(document):
         return {'status': 'Disabled', 'violations': [], 'lines': [], 'excluded_rows': [],
             'message': 'Discount Matrix enforcement is disabled in VDM Settings. No discount limit is being enforced.'}
     result = inspect(doc)
-    return {k: result[k] for k in ('status', 'lines', 'violations', 'message', 'excluded_rows')}
+    response = {k: result[k] for k in ('status', 'lines', 'violations', 'message', 'excluded_rows')}
+    response['can_approve'] = can_approve(result)
+    return response
+
+
+def can_approve(result):
+    """Whether the current user may approve these prices: drives the Approve button only.
+    A Finance Manager is not offered it on prices only the margin approver (MD) can approve."""
+    if not result.get('violations') or not approvals_allowed():
+        return False
+    needed = result.get('required_level')
+    if needed in (BELOW_COST, BELOW_FLOOR):
+        return False
+    level = user_level(options())
+    return bool(level and covers(level, needed))
 
 
 @frappe.whitelist()
@@ -465,7 +501,7 @@ def approve(doctype, name, reason):
     if not result['violations']:
         frappe.throw('This document does not require a discount exception.')
     if not covers(level, result.get('required_level')):
-        frappe.throw(f"These prices are below the margin minimum and need approval by {opts['approver_role']}.",
+        frappe.throw(f"These prices are below the margin minimum, the margin floor or cost, and need approval by {opts['approver_role']}.",
                      frappe.PermissionError)
     # Persist controller recalculations before recording the terms approved. Nothing the
     # approver typed is saved, so this runs with system permission once the role is confirmed.

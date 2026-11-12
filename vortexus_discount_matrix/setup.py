@@ -1,7 +1,7 @@
 import frappe
 from vortexus_discount_matrix.core import (MATRIX_COLUMNS, MATRIX_MODES, DISCOUNT_MODE, LIMIT_FIELDS, default_limit_rows, policy,
     COST_BASES, SYSTEM_COST, DEFAULT_APPROVER_ROLE, DEFAULT_DISCOUNT_ROLE, DEFAULT_INTERCOMPANY_GROUP, DEFAULT_INTERCOMPANY_MARKUP,
-    MARGIN_FLOOR_ACTIONS, BLOCK_FLOOR)
+    MARGIN_FLOOR_ACTIONS, BLOCK_FLOOR, APPROVE_FLOOR, BELOW_COST_ACTIONS)
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
@@ -52,6 +52,7 @@ def install():
     controls_added = not any(f.fieldname == 'block_below_cost' for f in settings_type.fields)
     intercompany_added = not any(f.fieldname == 'intercompany_pricing' for f in settings_type.fields)
     floor_action_added = not any(f.fieldname == 'margin_floor_action' for f in settings_type.fields)
+    cost_action_added = not any(f.fieldname == 'below_cost_action' for f in settings_type.fields)
     discount_role_added = not any(f.fieldname == 'discount_approver_role' for f in settings_type.fields)
     for definition in [
         field('allow_manager_approvals', ALLOW_LABEL, 'Check', default='1', description=ALLOW_DESCRIPTION),
@@ -72,9 +73,9 @@ def install():
             description='One row per exact Item Group. Item Groups not listed are outside this control when Margin Matrix is in use. '
                         'Each value must be at least 0 and below 100. Items need a valuation rate to be checked.'),
         field('margins_initialized', 'Margins Initialized', 'Check', hidden=1, read_only=1, default='0'),
-        field('block_below_cost', 'Block Sales Below Cost', 'Check', default='1',
-            description='A controlled line priced below its cost cannot be submitted and cannot be approved by anyone. '
-                        'Applies in every matrix mode; lines without a known cost are not blocked by this rule.'),
+        field('block_below_cost', CHECK_COST_LABEL, 'Check', default='1', description=CHECK_COST_DESCRIPTION),
+        field('below_cost_action', 'Below Cost', 'Select', options='\n'.join(BELOW_COST_ACTIONS), default=APPROVE_FLOOR,
+            depends_on='eval:doc.block_below_cost', description=BELOW_COST_DESCRIPTION),
         field('cost_basis', 'Cost Basis', 'Select', options='\n'.join(COST_BASES), default=SYSTEM_COST,
             description='System cost: the cost ERPNext would book if the goods left the row warehouse now (FIFO stock queue), '
                         'then the company-wide stock valuation, then the last purchase rate. The Item master valuation rate is not used. '
@@ -84,10 +85,8 @@ def install():
                         'Costs move with every stock receipt; a larger rise needs a new approval.'),
         field('margin_approver_role', 'Margin Approver Role', 'Link', options='Role', default=DEFAULT_APPROVER_ROLE,
             description=MARGIN_ROLE_DESCRIPTION),
-        field('margin_floor_action', 'Below the Margin Floor', 'Select', options='\n'.join(MARGIN_FLOOR_ACTIONS), default=BLOCK_FLOOR,
-            description='Block: a price below the margin floor cannot be submitted or approved by anyone, like a price below cost. '
-                        'Lines without a known cost then need a Discount Approver Role approval with a reason. '
-                        'Approval by margin approver: the Margin Approver Role may approve with a reason.'),
+        field('margin_floor_action', 'Below the Margin Floor', 'Select', options='\n'.join(MARGIN_FLOOR_ACTIONS), default=APPROVE_FLOOR,
+            description=FLOOR_DESCRIPTION),
         field('intercompany_pricing', 'Price Intercompany Sales at Cost Plus Markup', 'Check', default='1',
             description='Customers in the intercompany Customer Group are priced at system cost plus the markup on every draft save. '
                         'Discounts are cleared; lines copied from an earlier document keep that price. Lines without a cost are left for manual entry.'),
@@ -105,7 +104,7 @@ def install():
     frappe.clear_cache(doctype='VDM Settings')
     settings = frappe.get_doc('VDM Settings')
     if (approvals_added or mode_added or controls_added or intercompany_added or floor_action_added
-            or discount_role_added or not settings.get('matrix_mode')):
+            or discount_role_added or cost_action_added or not settings.get('matrix_mode')):
         if approvals_added:
             settings.allow_manager_approvals = 1
         if not settings.get('matrix_mode'):
@@ -118,6 +117,11 @@ def install():
             settings.margin_approver_role = DEFAULT_APPROVER_ROLE
         if floor_action_added:
             settings.margin_floor_action = BLOCK_FLOOR
+        if cost_action_added:
+            # Policy (0.14): MD may approve prices below the margin floor and below cost, with a reason.
+            # Applied once on upgrade; later choices in VDM Settings are kept.
+            settings.below_cost_action = APPROVE_FLOOR
+            settings.margin_floor_action = APPROVE_FLOOR
         if discount_role_added:
             # Policy (0.13): discount exceptions move from Sales Manager to Finance Manager.
             settings.discount_approver_role = DEFAULT_DISCOUNT_ROLE
@@ -201,6 +205,8 @@ def upgrade_doctypes():
     # Labels and help text written by earlier versions; install() only adds missing fields.
     wanted = {'matrix_mode': dict(options='\n'.join(MATRIX_MODES), description=MODE_DESCRIPTION),
               'allow_manager_approvals': dict(label=ALLOW_LABEL, description=ALLOW_DESCRIPTION),
+              'block_below_cost': dict(label=CHECK_COST_LABEL, description=CHECK_COST_DESCRIPTION),
+              'margin_floor_action': dict(description=FLOOR_DESCRIPTION),
               'margin_approver_role': dict(description=MARGIN_ROLE_DESCRIPTION)}
     settings_changed = False
     for df in settings_type.fields:
@@ -220,8 +226,18 @@ ALLOW_DESCRIPTION = ('When unchecked, direct and inherited exceptions cannot aut
 DISCOUNT_ROLE_DESCRIPTION = ('Approves discounts above the discount matrix (and, with the margin floor blocked, '
                              'lines without a known cost). Gets read access to Quotations, Sales Orders and '
                              'Sales Invoices on migration so it can open them to approve. Sales Managers cannot approve.')
-MARGIN_ROLE_DESCRIPTION = ('Approves prices below the margin minimum and lines without a known cost, '
+MARGIN_ROLE_DESCRIPTION = ('Approves, with a reason, prices below the margin minimum, below the margin floor and below cost '
+                           '(when Below the Margin Floor or Below Cost is set to approval), lines without a known cost, '
                            'and everything the Discount Approver Role can approve.')
+CHECK_COST_LABEL = 'Check Sales Below Cost'
+CHECK_COST_DESCRIPTION = ('Flags a controlled line priced below its cost, in every matrix mode. '
+                          'Below Cost decides whether it is blocked or needs the Margin Approver Role. '
+                          'Lines without a known cost are not caught by this rule.')
+BELOW_COST_DESCRIPTION = ('Block: a price below cost cannot be submitted or approved by anyone. '
+                          'Approval by margin approver: only the Margin Approver Role (MD) may approve it, with a reason.')
+FLOOR_DESCRIPTION = ('Block: a price below the margin floor cannot be submitted or approved by anyone. '
+                     'Lines without a known cost then need a Discount Approver Role approval with a reason. '
+                     'Approval by margin approver: only the Margin Approver Role (MD) may approve it, with a reason.')
 
 
 def install_discount_approver_access():
@@ -370,7 +386,7 @@ def install_approval_view():
 
 def order_settings_fields(settings_type):
     # Put controls before the long mapping grid on upgraded sites as well.
-    order = ['enabled', 'allow_manager_approvals', 'discount_approver_role', 'matrix_mode', 'block_below_cost', 'cost_basis', 'cost_tolerance',
+    order = ['enabled', 'allow_manager_approvals', 'discount_approver_role', 'matrix_mode', 'block_below_cost', 'below_cost_action', 'cost_basis', 'cost_tolerance',
              'margin_floor_action', 'margin_approver_role', 'intercompany_pricing', 'intercompany_customer_group', 'intercompany_markup', 'price_list',
              'customer_mappings', 'mappings_initialized', 'discount_limits', 'limits_initialized',
              'margin_limits', 'margins_initialized']

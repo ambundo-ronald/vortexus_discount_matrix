@@ -2,7 +2,7 @@ import frappe
 from frappe.utils import flt
 from vortexus_discount_matrix.core import (mapping_from_rows, limits_from_rows,
     DISCOUNT_MODE, MARGIN_MODE, BOTH_MODE, MATRIX_MODES, SYSTEM_COST, COST_BASES, DEFAULT_APPROVER_ROLE,
-    MARGIN_FLOOR_ACTIONS, BLOCK_FLOOR, DEFAULT_DISCOUNT_ROLE)
+    MARGIN_FLOOR_ACTIONS, BLOCK_FLOOR, BELOW_COST_ACTIONS, DEFAULT_DISCOUNT_ROLE)
 
 
 def validate(doc, method=None):
@@ -13,6 +13,8 @@ def validate(doc, method=None):
             raise ValueError('Select a valid Cost Basis.')
         if doc.get('margin_floor_action') and doc.get('margin_floor_action') not in MARGIN_FLOOR_ACTIONS:
             raise ValueError('Select what happens below the margin floor: Block, or Approval by margin approver.')
+        if doc.get('below_cost_action') and doc.get('below_cost_action') not in BELOW_COST_ACTIONS:
+            raise ValueError('Select what happens below cost: Block, or Approval by margin approver.')
         if not 0 <= flt(doc.get('cost_tolerance')) <= 100:
             raise ValueError('Cost tolerance must be between 0 and 100%.')
         if not 0 <= flt(doc.get('intercompany_markup')) <= 1000:
@@ -80,8 +82,10 @@ def control_options():
     role = value('margin_approver_role')
     discount_role = value('discount_approver_role')
     action = value('margin_floor_action')
+    cost_action = value('below_cost_action')
     return dict(
         margin_floor_action=action if action in MARGIN_FLOOR_ACTIONS else BLOCK_FLOOR,
+        below_cost_action=cost_action if cost_action in BELOW_COST_ACTIONS else BLOCK_FLOOR,
         block_below_cost=str(1 if block is None else block) in ('1', 'True'),
         cost_basis=basis if basis in COST_BASES else SYSTEM_COST,
         cost_tolerance=flt(tolerance) if isinstance(tolerance, (int, float, str)) and not isinstance(tolerance, bool) else 5.0,
